@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>TruckLedger</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">TruckLedger</div>
+
+      <div class="actions">
+        <label id="profile-wrap" class="profile-control" hidden>
+          <span>Profile</span>
+          <select id="profile-select"></select>
+        </label>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <p id="notice" class="notice" role="status" aria-live="polite"></p>
+
+    <section id="empty-state" class="empty-state" hidden>
+      <strong>No profiles yet.</strong>
+      <span>Run <code>truck-ledger setup</code> once, then play ETS2 normally.</span>
+    </section>
+
+    <div id="dashboard" hidden>
+      <section id="summary" class="summary" aria-label="Profile summary"></section>
+
+      <section class="driver-highlights" aria-labelledby="driver-highlights-title">
+        <div class="section-heading">
+          <div>
+            <h1 id="driver-highlights-title">Drivers</h1>
+            <p class="muted">Who earns, who loses, and how each driver performs across the full archive.</p>
+          </div>
+        </div>
+
+        <div class="highlight-columns">
+          <section class="ranking-group" aria-labelledby="top-drivers-title">
+            <div class="group-heading">
+              <h2 id="top-drivers-title">Top drivers</h2>
+              <span>By total net</span>
+            </div>
+            <div id="top-drivers" class="ranking-list"></div>
+          </section>
+
+          <section class="ranking-group" aria-labelledby="losing-drivers-title">
+            <div class="group-heading">
+              <h2 id="losing-drivers-title">Losing drivers</h2>
+              <span>Needs attention</span>
+            </div>
+            <div id="losing-drivers" class="ranking-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="all-drivers-section" aria-labelledby="all-drivers-title">
+        <div class="section-heading">
+          <div>
+            <h1 id="all-drivers-title">All drivers</h1>
+            <p id="driver-status" class="muted"></p>
+          </div>
+        </div>
+
+        <div class="table-wrap" tabindex="0">
+          <table class="drivers-table">
+            <thead>
+              <tr>
+                <th>Driver</th>
+                <th>Trips</th>
+                <th>Loaded</th>
+                <th>Empty</th>
+                <th>Distance</th>
+                <th>Revenue</th>
+                <th>Costs</th>
+                <th>Net</th>
+              </tr>
+            </thead>
+            <tbody id="drivers"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="driver-detail" class="driver-detail" aria-labelledby="driver-detail-title" hidden>
+        <div class="detail-heading">
+          <div>
+            <p class="detail-kicker">Driver history</p>
+            <h1 id="driver-detail-title">Driver</h1>
+            <p id="driver-detail-meta" class="muted"></p>
+          </div>
+          <button id="close-driver" type="button">Close</button>
+        </div>
+
+        <div class="table-wrap" tabindex="0">
+          <table class="trips-table">
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>Route</th>
+                <th>Cargo</th>
+                <th>Activity</th>
+                <th>Distance</th>
+                <th>Revenue</th>
+                <th>Wage</th>
+                <th>Maintenance</th>
+                <th>Fuel</th>
+                <th>Net</th>
+              </tr>
+            </thead>
+            <tbody id="driver-trips"></tbody>
+          </table>
+        </div>
+
+        <nav class="pagination" aria-label="Driver trip pages">
+          <button id="previous" type="button">← Previous</button>
+          <span id="page-label"></span>
+          <button id="next" type="button">Next →</button>
+        </nav>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

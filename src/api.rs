@@ -13,6 +13,10 @@ pub const DEFAULT_API_PORT: u16 = 32947;
 const SCHEMA_VERSION: i64 = 2;
 const DEFAULT_LIMIT: u32 = 50;
 const MAX_LIMIT: u32 = 200;
+const DASHBOARD_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/web/index.html"));
+const DASHBOARD_JAVASCRIPT: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/web/app.js"));
+const DASHBOARD_STYLESHEET: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/web/styles.css"));
 
 #[derive(Debug)]
 enum ApiFailure {
@@ -111,6 +115,12 @@ fn json_response<T: Serialize>(status: u16, value: &T) -> Response<std::io::Curs
         .with_header(Header::from_bytes("Content-Type", "application/json").unwrap())
         .with_header(Header::from_bytes("Cache-Control", "no-store").unwrap())
 }
+fn static_response(content_type: &str, body: &'static str) -> Response<std::io::Cursor<Vec<u8>>> {
+    Response::from_string(body)
+        .with_status_code(StatusCode(200))
+        .with_header(Header::from_bytes("Content-Type", content_type).unwrap())
+        .with_header(Header::from_bytes("Cache-Control", "no-store").unwrap())
+}
 
 #[derive(Serialize)]
 struct MetadataDto {
@@ -130,6 +140,36 @@ struct ProfileDto {
 #[derive(Serialize)]
 struct DriversDto {
     drivers: Vec<DriverDto>,
+}
+#[derive(Serialize)]
+struct DriverStatsDto {
+    drivers: Vec<DriverStatDto>,
+}
+#[derive(Serialize)]
+struct DriverStatDto {
+    raw_id: String,
+    trip_count: u64,
+    loaded_trip_count: u64,
+    empty_trip_count: u64,
+    total_distance: String,
+    total_revenue: String,
+    total_wage: String,
+    total_maintenance: String,
+    total_fuel: String,
+    total_costs: String,
+    total_net: String,
+}
+struct DriverStat {
+    raw_id: String,
+    trip_count: u64,
+    loaded_trip_count: u64,
+    empty_trip_count: u64,
+    total_distance: i64,
+    total_revenue: i64,
+    total_wage: i64,
+    total_maintenance: i64,
+    total_fuel: i64,
+    total_net: i64,
 }
 #[derive(Serialize)]
 struct DriverDto {
@@ -245,6 +285,121 @@ fn drivers(connection: &Connection, scope: &str) -> Result<DriversDto, ApiFailur
     rows.collect::<Result<Vec<_>, _>>()
         .map(|drivers| DriversDto { drivers })
         .map_err(database_failure)
+}
+
+fn driver_stats(connection: &Connection, scope: &str) -> Result<DriverStatsDto, ApiFailure> {
+    profile_exists(connection, scope)?;
+    let mut statement = connection
+        .prepare("SELECT d.raw_driver_id,t.revenue,t.wage,t.maintenance,t.fuel,t.distance,t.distance_on_job FROM drivers d JOIN profiles p ON p.id=d.profile_id LEFT JOIN trips t ON t.driver_id=d.id AND t.profile_id=p.id WHERE p.scope_key=?1 ORDER BY d.raw_driver_id ASC,t.id ASC")
+        .map_err(database_failure)?;
+    let mut rows = statement.query([scope]).map_err(database_failure)?;
+    let mut totals = Vec::new();
+    while let Some(row) = rows.next().map_err(database_failure)? {
+        let raw_id: String = row.get(0).map_err(database_failure)?;
+        let is_new = totals
+            .last()
+            .is_none_or(|driver: &DriverStat| driver.raw_id != raw_id);
+        if is_new {
+            totals.push(DriverStat {
+                raw_id,
+                trip_count: 0,
+                loaded_trip_count: 0,
+                empty_trip_count: 0,
+                total_distance: 0,
+                total_revenue: 0,
+                total_wage: 0,
+                total_maintenance: 0,
+                total_fuel: 0,
+                total_net: 0,
+            });
+        }
+        let Some(revenue) = row.get::<_, Option<i64>>(1).map_err(database_failure)? else {
+            continue;
+        };
+        let wage: i64 = row.get(2).map_err(database_failure)?;
+        let maintenance: i64 = row.get(3).map_err(database_failure)?;
+        let fuel: i64 = row.get(4).map_err(database_failure)?;
+        let distance: i64 = row.get(5).map_err(database_failure)?;
+        let loaded: bool = row.get::<_, i64>(6).map_err(database_failure)? != 0;
+        let stat = totals.last_mut().ok_or(ApiFailure::Internal)?;
+        let trip_count = stat.trip_count.checked_add(1).ok_or(ApiFailure::Internal)?;
+        let loaded_trip_count = if loaded {
+            stat.loaded_trip_count
+                .checked_add(1)
+                .ok_or(ApiFailure::Internal)?
+        } else {
+            stat.loaded_trip_count
+        };
+        let empty_trip_count = if loaded {
+            stat.empty_trip_count
+        } else {
+            stat.empty_trip_count
+                .checked_add(1)
+                .ok_or(ApiFailure::Internal)?
+        };
+        let total_distance = stat
+            .total_distance
+            .checked_add(distance)
+            .ok_or(ApiFailure::Internal)?;
+        let total_revenue = stat
+            .total_revenue
+            .checked_add(revenue)
+            .ok_or(ApiFailure::Internal)?;
+        let total_wage = stat
+            .total_wage
+            .checked_add(wage)
+            .ok_or(ApiFailure::Internal)?;
+        let total_maintenance = stat
+            .total_maintenance
+            .checked_add(maintenance)
+            .ok_or(ApiFailure::Internal)?;
+        let total_fuel = stat
+            .total_fuel
+            .checked_add(fuel)
+            .ok_or(ApiFailure::Internal)?;
+        let trip_net = revenue
+            .checked_sub(wage)
+            .and_then(|value| value.checked_sub(maintenance))
+            .and_then(|value| value.checked_sub(fuel))
+            .ok_or(ApiFailure::Internal)?;
+        let total_net = stat
+            .total_net
+            .checked_add(trip_net)
+            .ok_or(ApiFailure::Internal)?;
+        stat.trip_count = trip_count;
+        stat.loaded_trip_count = loaded_trip_count;
+        stat.empty_trip_count = empty_trip_count;
+        stat.total_distance = total_distance;
+        stat.total_revenue = total_revenue;
+        stat.total_wage = total_wage;
+        stat.total_maintenance = total_maintenance;
+        stat.total_fuel = total_fuel;
+        stat.total_net = total_net;
+    }
+    let drivers = totals
+        .into_iter()
+        .map(|stat| {
+            let total_costs = stat
+                .total_wage
+                .checked_add(stat.total_maintenance)
+                .and_then(|value| value.checked_add(stat.total_fuel))
+                .ok_or(ApiFailure::Internal)?;
+            Ok(DriverStatDto {
+                raw_id: stat.raw_id,
+                trip_count: stat.trip_count,
+                loaded_trip_count: stat.loaded_trip_count,
+                empty_trip_count: stat.empty_trip_count,
+                total_distance: stat.total_distance.to_string(),
+                total_revenue: stat.total_revenue.to_string(),
+                total_wage: stat.total_wage.to_string(),
+                total_maintenance: stat.total_maintenance.to_string(),
+                total_fuel: stat.total_fuel.to_string(),
+                total_costs: total_costs.to_string(),
+                total_net: stat.total_net.to_string(),
+            })
+        })
+        .collect::<Result<Vec<_>, ApiFailure>>()?;
+    Ok(DriverStatsDto { drivers })
 }
 
 #[derive(Default)]
@@ -440,11 +595,12 @@ fn known_route(path: &str) -> bool {
         ["", "api", "v1"]
             | ["", "api", "v1", "profiles"]
             | ["", "api", "v1", "profiles", _, "drivers"]
+            | ["", "api", "v1", "profiles", _, "driver-stats"]
             | ["", "api", "v1", "profiles", _, "trips"]
             | ["", "api", "v1", "profiles", _, "summary"]
     )
 }
-fn route(database: &Path, method: &Method, url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+fn api_route(database: &Path, method: &Method, url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let (path, query) = split_url(url);
     if !known_route(path) {
         return error_response(ApiFailure::NotFound);
@@ -470,6 +626,9 @@ fn route(database: &Path, method: &Method, url: &str) -> Response<std::io::Curso
             ["", "api", "v1", "profiles", scope, "drivers"] if query.is_none() => Ok(
                 json_response(200, &drivers(&connection, &decode_scope(scope)?)?),
             ),
+            ["", "api", "v1", "profiles", scope, "driver-stats"] if query.is_none() => Ok(
+                json_response(200, &driver_stats(&connection, &decode_scope(scope)?)?),
+            ),
             ["", "api", "v1", "profiles", scope, "trips"] => Ok(json_response(
                 200,
                 &trips(&connection, &decode_scope(scope)?, pagination(query)?)?,
@@ -483,6 +642,23 @@ fn route(database: &Path, method: &Method, url: &str) -> Response<std::io::Curso
     match result {
         Ok(response) => response,
         Err(error) => error_response(error),
+    }
+}
+
+fn route(database: &Path, method: &Method, url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    let (path, _) = split_url(url);
+    if path.starts_with("/api/") {
+        return api_route(database, method, url);
+    }
+    if *method != Method::Get {
+        return error_response(ApiFailure::MethodNotAllowed)
+            .with_header(Header::from_bytes("Allow", "GET").unwrap());
+    }
+    match path {
+        "/" => static_response("text/html; charset=utf-8", DASHBOARD_HTML),
+        "/app.js" => static_response("text/javascript; charset=utf-8", DASHBOARD_JAVASCRIPT),
+        "/styles.css" => static_response("text/css; charset=utf-8", DASHBOARD_STYLESHEET),
+        _ => error_response(ApiFailure::NotFound),
     }
 }
 
@@ -530,7 +706,7 @@ pub fn start_for_tests(database: &Path, port: u16) -> Result<ApiServer, crate::E
 pub fn serve(database: &Path, port: u16) -> Result<(), crate::Error> {
     let server = start_for_tests(database, port)?;
     println!(
-        "TruckLedger local API listening on http://{}",
+        "TruckLedger dashboard and local API listening on http://{}",
         server.address()
     );
     loop {
@@ -541,7 +717,7 @@ pub fn serve(database: &Path, port: u16) -> Result<(), crate::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{extract, ingest, open_database};
+    use crate::{Driver, Trip, extract, ingest, open_database};
     use serde_json::Value;
     use std::{
         io::{Read, Write},
@@ -553,7 +729,49 @@ mod tests {
         include_str!("../reference/fixtures/hired_drivers_minimal.sii").into()
     }
 
-    fn request(port: u16, method: &str, path: &str) -> (u16, Vec<(String, String)>, Value) {
+    fn driver(raw_id: &str, trips: Vec<Trip>) -> Driver {
+        Driver {
+            raw_id: raw_id.into(),
+            adr: 0,
+            long_dist: 0,
+            heavy: 0,
+            fragile: 0,
+            urgent: 0,
+            mechanical: 0,
+            hometown: "home".into(),
+            current_city: "city".into(),
+            experience_points: 0,
+            trips,
+        }
+    }
+
+    fn trip(
+        timestamp_day: i64,
+        revenue: i64,
+        wage: i64,
+        maintenance: i64,
+        fuel: i64,
+        distance: i64,
+        distance_on_job: bool,
+    ) -> Trip {
+        Trip {
+            timestamp_day,
+            revenue,
+            wage,
+            maintenance,
+            fuel,
+            distance,
+            distance_on_job,
+            cargo_count: 0,
+            cargo: String::new(),
+            source_city: String::new(),
+            source_company: String::new(),
+            destination_city: String::new(),
+            destination_company: String::new(),
+        }
+    }
+
+    fn request_raw(port: u16, method: &str, path: &str) -> (u16, Vec<(String, String)>, String) {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))
@@ -579,7 +797,273 @@ mod tests {
             .filter_map(|line| line.split_once(':'))
             .map(|(k, v)| (k.to_ascii_lowercase(), v.trim().to_owned()))
             .collect();
-        (status, headers, serde_json::from_str(body).unwrap())
+        (status, headers, body.to_owned())
+    }
+
+    fn request(port: u16, method: &str, path: &str) -> (u16, Vec<(String, String)>, Value) {
+        let (status, headers, body) = request_raw(port, method, path);
+        (status, headers, serde_json::from_str(&body).unwrap())
+    }
+
+    #[test]
+    fn http_api_driver_stats_reconcile_summary_and_preserve_read_only_state() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("ledger.sqlite3");
+        let mut db = open_database(&path).unwrap();
+        ingest(
+            &mut db,
+            "main",
+            &[
+                driver(
+                    "driver.10",
+                    vec![
+                        trip(1, 30_000, 20_000, 3_000, 2_000, 1_200, true),
+                        trip(2, 0, 0, 0, 1_500, 900, false),
+                    ],
+                ),
+                driver("driver.11", vec![]),
+                driver(
+                    "driver.12",
+                    vec![
+                        trip(3, 0, 0, 0, 1_000, 100, true),
+                        trip(4, 0, 0, 0, 2_000, 200, false),
+                    ],
+                ),
+                driver("driver.13", vec![trip(5, 100, 100, 0, 0, 10, true)]),
+            ],
+        )
+        .unwrap();
+        ingest(
+            &mut db,
+            "other",
+            &[driver(
+                "driver.10",
+                vec![trip(6, 9_007_199_254_740_993, 0, 0, 0, 9, true)],
+            )],
+        )
+        .unwrap();
+        let version: i64 = db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        let counts: (i64, i64, i64) = db.query_row("SELECT (SELECT count(*) FROM profiles),(SELECT count(*) FROM drivers),(SELECT count(*) FROM trips)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        let fingerprints: Vec<Vec<u8>> = {
+            let mut statement = db
+                .prepare("SELECT fingerprint FROM trips ORDER BY id")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        drop(db);
+
+        let server = start_for_tests(&path, 0).unwrap();
+        let port = server.address().port();
+        let (status, headers, body) = request(port, "GET", "/api/v1/profiles/main/driver-stats");
+        assert_eq!(status, 200);
+        assert!(
+            headers
+                .iter()
+                .any(|x| x == &("content-type".into(), "application/json".into()))
+        );
+        assert!(
+            headers
+                .iter()
+                .any(|x| x == &("cache-control".into(), "no-store".into()))
+        );
+        let stats = body["drivers"].as_array().unwrap();
+        assert_eq!(
+            stats
+                .iter()
+                .map(|driver| driver["raw_id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["driver.10", "driver.11", "driver.12", "driver.13"]
+        );
+        assert_eq!(
+            stats[0],
+            serde_json::json!({"raw_id":"driver.10","trip_count":2,"loaded_trip_count":1,"empty_trip_count":1,"total_distance":"2100","total_revenue":"30000","total_wage":"20000","total_maintenance":"3000","total_fuel":"3500","total_costs":"26500","total_net":"3500"})
+        );
+        assert_eq!(
+            stats[1],
+            serde_json::json!({"raw_id":"driver.11","trip_count":0,"loaded_trip_count":0,"empty_trip_count":0,"total_distance":"0","total_revenue":"0","total_wage":"0","total_maintenance":"0","total_fuel":"0","total_costs":"0","total_net":"0"})
+        );
+        assert_eq!(stats[2]["total_net"], "-3000");
+        assert_eq!(stats[3]["total_net"], "0");
+        assert_eq!(stats[0]["total_revenue"], "30000");
+        assert_eq!(stats[0]["total_costs"], "26500");
+        assert_eq!(stats[0]["total_net"], "3500");
+        assert!(
+            stats
+                .iter()
+                .all(|driver| driver["loaded_trip_count"].as_u64().unwrap()
+                    + driver["empty_trip_count"].as_u64().unwrap()
+                    == driver["trip_count"].as_u64().unwrap())
+        );
+        let (_, _, other) = request(port, "GET", "/api/v1/profiles/other/driver-stats");
+        assert_eq!(other["drivers"][0]["total_revenue"], "9007199254740993");
+        let (status, _, missing) = request(port, "GET", "/api/v1/profiles/missing/driver-stats");
+        assert_eq!(status, 404);
+        assert_eq!(missing["error"]["code"], "profile_not_found");
+        let (_, _, summary) = request(port, "GET", "/api/v1/profiles/main/summary");
+        let count_fields = [
+            ("trip_count", "trip_count"),
+            ("loaded_trip_count", "loaded_trip_count"),
+            ("empty_trip_count", "empty_trip_count"),
+        ];
+        for (driver_field, summary_field) in count_fields {
+            let total = stats
+                .iter()
+                .map(|driver| driver[driver_field].as_u64().unwrap())
+                .try_fold(0_u64, |total, value| total.checked_add(value))
+                .unwrap();
+            assert_eq!(
+                total,
+                summary[summary_field].as_u64().unwrap(),
+                "{summary_field}"
+            );
+        }
+        for (driver_field, summary_field) in [
+            ("total_distance", "total_distance"),
+            ("total_revenue", "total_revenue"),
+            ("total_wage", "total_wage"),
+            ("total_maintenance", "total_maintenance"),
+            ("total_fuel", "total_fuel"),
+            ("total_net", "total_net"),
+        ] {
+            let total = stats
+                .iter()
+                .map(|driver| {
+                    driver[driver_field]
+                        .as_str()
+                        .unwrap()
+                        .parse::<i64>()
+                        .unwrap()
+                })
+                .try_fold(0_i64, |total, value| total.checked_add(value))
+                .unwrap();
+            assert_eq!(
+                total.to_string(),
+                summary[summary_field].as_str().unwrap(),
+                "{summary_field}"
+            );
+        }
+        server.shutdown();
+
+        let db = open_database(&path).unwrap();
+        assert_eq!(
+            db.query_row::<i64, _, _>("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap(),
+            version
+        );
+        assert_eq!(db.query_row("SELECT (SELECT count(*) FROM profiles),(SELECT count(*) FROM drivers),(SELECT count(*) FROM trips)", [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))).unwrap(), counts);
+        let mut statement = db
+            .prepare("SELECT fingerprint FROM trips ORDER BY id")
+            .unwrap();
+        let after: Vec<Vec<u8>> = statement
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(after, fingerprints);
+    }
+
+    #[test]
+    fn http_api_driver_stats_overflows_are_controlled() {
+        for trips in [
+            vec![trip(1, i64::MIN, 1, 0, 0, 0, true)],
+            vec![
+                trip(1, 0, 0, 0, 0, i64::MAX, true),
+                trip(2, 0, 0, 0, 0, 1, true),
+            ],
+            vec![
+                trip(1, i64::MAX, 0, 0, 0, 0, true),
+                trip(2, 1, 0, 0, 0, 0, true),
+            ],
+            vec![
+                trip(1, i64::MAX, i64::MAX, 0, 0, 0, true),
+                trip(2, 0, 1, 0, 0, 0, true),
+            ],
+            vec![
+                trip(1, 0, i64::MIN, 0, 0, 0, true),
+                trip(2, 0, -1, 0, 0, 0, true),
+            ],
+        ] {
+            let td = tempfile::tempdir().unwrap();
+            let path = td.path().join("ledger.sqlite3");
+            let mut db = open_database(&path).unwrap();
+            ingest(&mut db, "main", &[driver("driver.overflow", trips)]).unwrap();
+            drop(db);
+            let server = start_for_tests(&path, 0).unwrap();
+            let (status, _, body) = request(
+                server.address().port(),
+                "GET",
+                "/api/v1/profiles/main/driver-stats",
+            );
+            assert_eq!(status, 500);
+            assert_eq!(body["error"]["code"], "internal_error");
+            server.shutdown();
+        }
+    }
+
+    #[test]
+    fn http_server_serves_embedded_dashboard_assets() {
+        let td = tempfile::tempdir().unwrap();
+        let db_path = td.path().join("ledger.sqlite3");
+        let db = open_database(&db_path).unwrap();
+        drop(db);
+        let server = start_for_tests(&db_path, 0).unwrap();
+        let port = server.address().port();
+
+        for (path, content_type, marker) in [
+            (
+                "/",
+                "text/html; charset=utf-8",
+                "<title>TruckLedger</title>",
+            ),
+            ("/app.js", "text/javascript; charset=utf-8", "driver-stats"),
+            ("/styles.css", "text/css; charset=utf-8", "--bg"),
+        ] {
+            let (status, headers, body) = request_raw(port, "GET", path);
+            assert_eq!(status, 200, "{path}");
+            assert!(
+                headers
+                    .iter()
+                    .any(|x| x == &("content-type".into(), content_type.into()))
+            );
+            assert!(
+                headers
+                    .iter()
+                    .any(|x| x == &("cache-control".into(), "no-store".into()))
+            );
+            assert!(body.contains(marker), "{path}");
+            if path == "/app.js" {
+                assert!(!body.contains("loadAllTrips"));
+                assert!(!body.contains("ARCHIVE_PAGE_SIZE"));
+                assert!(!body.contains("limit: String(200)"));
+            }
+        }
+        server.shutdown();
+    }
+
+    #[test]
+    fn http_server_rejects_unknown_and_traversal_static_paths() {
+        let td = tempfile::tempdir().unwrap();
+        let db_path = td.path().join("ledger.sqlite3");
+        let db = open_database(&db_path).unwrap();
+        drop(db);
+        let server = start_for_tests(&db_path, 0).unwrap();
+        for path in [
+            "/missing",
+            "/../Cargo.toml",
+            "/%2e%2e/Cargo.toml",
+            "/web/app.js",
+        ] {
+            let (status, _, body) = request_raw(server.address().port(), "GET", path);
+            assert_eq!(status, 404, "{path}");
+            assert!(!body.contains("[package]"), "{path}");
+        }
+        server.shutdown();
     }
 
     #[test]

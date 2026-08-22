@@ -63,7 +63,7 @@ enum Command {
         #[arg(long, default_value_t = 30, value_parser = parse_monitor_lines)]
         lines: usize,
     },
-    /// Serve the local read-only HTTP API.
+    /// Serve the local dashboard and read-only HTTP API.
     Serve {
         #[arg(long, default_value_t = truck_ledger::api::DEFAULT_API_PORT)]
         port: u16,

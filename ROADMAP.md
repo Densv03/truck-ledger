@@ -145,6 +145,11 @@ garage/cargo analytics, framework adoption without demonstrated need.
 **Acceptance:** browser dashboard displays collected data through loopback API;
 no remote dependency/account required.
 
+**Status:** implemented as embedded plain HTML/CSS/JavaScript served from
+`truck-ledger serve` on same loopback origin as `/api/v1`. Dashboard is a
+read-only local viewer with profile selection, summary, hired-driver snapshots,
+driver-filtered paginated trips, and manual refresh.
+
 ## Phase 6 — release engineering
 
 **Objective:** prepare public v0.1 distribution.

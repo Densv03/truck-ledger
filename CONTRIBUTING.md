@@ -109,11 +109,26 @@ cargo run -- serve --help
 existing schema-v2 database with SQLite read-only flags; tests must prove it
 does not alter schema, rows, fingerprints, or profile locators.
 
+## Phase 5 dashboard assets
+
+Dashboard assets live in `web/` as plain `index.html`, `app.js`, and
+`styles.css`. They are compiled into binary with `include_str!`; do not add a
+runtime asset lookup, Node/npm toolchain, generated bundle, or API writes.
+
+Use DOM APIs and `textContent` for persisted API values. API `i64` strings must
+remain strings: `app.js` groups decimal digits directly and must not convert
+money, distance, or other domain integers through JavaScript `Number`.
+`timestamp_day` displays as raw `Day <value>`, never calendar date. Formatter
+self-check vectors cover signed values through both i64 bounds during module
+initialization; static-route coverage runs under `cargo test api::tests`.
+Driver lifetime aggregation belongs in `GET /api/v1/profiles/{scope}/driver-stats`;
+do not reintroduce browser-side full-archive scans.
+
 ## Scope and safety
 
-Keep Phase 4 bounded. Do not add dashboard UI, HTTP writes, remote/LAN serving,
-root/system services, collector polling, or release packaging before planned
-phases.
+Keep Phase 5 bounded. Do not add HTTP writes, remote/LAN serving, root/system
+services, collector polling, frontend build tooling, or release packaging
+before planned phases.
 
 Never commit personal saves, profile identifiers, Steam IDs, local databases,
 or hard-coded personal paths. Original ETS2 saves must remain read-only.

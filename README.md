@@ -103,10 +103,10 @@ installation is not implemented.
 activity without starting collection or changing service state. Closing it with
 Ctrl+C never stops the background collector.
 
-## Development local API
+## Local dashboard and API
 
-Phase 4 adds a manual, foreground, read-only HTTP API for dashboard
-development:
+Phase 5 adds a local, foreground dashboard served by same read-only HTTP
+server as API:
 
 ```sh
 truck-ledger serve
@@ -114,12 +114,22 @@ truck-ledger serve --port 40000
 truck-ledger serve --database /tmp/ledger.sqlite3 --port 40000
 ```
 
-Default origin is `http://127.0.0.1:32947`. `serve` binds only IPv4 loopback,
-opens existing TruckLedger SQLite data read-only, and exposes versioned routes
-under `/api/v1`. It never collects saves, starts a second collector, changes
-LaunchAgent state, or modifies archived data. No dashboard exists yet; normal
-Phase 3 background collection remains independent. API `i64` domain values are
-decimal JSON strings so browser clients do not lose precision.
+Open `http://127.0.0.1:32947/` after starting `serve`. Dashboard is local
+viewer for persisted history: profiles, summary, hired-driver snapshots, and
+server-computed per-driver lifetime performance with paginated selected-driver
+trip history. It is read-only; it never modifies ETS2 saves or
+TruckLedger history. Background collection remains automatic after `setup` and
+independent from dashboard server.
+
+`serve` binds only IPv4 loopback, opens existing TruckLedger SQLite data
+read-only, and exposes versioned routes under `/api/v1`. It never collects
+saves, starts a second collector, changes LaunchAgent state, or modifies
+archived data. API `i64` domain values are decimal JSON strings so browser
+clients do not lose precision.
+
+`GET /api/v1/profiles/{scope}/driver-stats` returns every persisted hired driver
+with profile-scoped lifetime counts and exact totals. It is computed read-only
+from archived trips on each request; zero-trip hired drivers remain present.
 
 Money and `timestamp_day` are raw ETS2 integers. Net is derived as `revenue -
 wage - maintenance - fuel`; no currency or wall-clock semantics are assumed.
@@ -141,7 +151,7 @@ storage, discover profiles and changed saves, and serve a browser dashboard on
 loopback only. Everything stays local: no cloud backend, accounts, remote sync,
 or telemetry.
 
-macOS is first tested platform. Dashboard remains Phase 5 work.
+macOS is first tested platform. Release packaging remains Phase 6 work.
 
 See [ROADMAP.md](ROADMAP.md) for phased scope and acceptance criteria.
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for decoder attribution.
