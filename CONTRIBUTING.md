@@ -76,6 +76,7 @@ cargo run -- setup --help
 cargo run -- status --help
 cargo run -- uninstall --help
 cargo run -- monitor --help
+cargo run -- serve --help
 ```
 
 Optional macOS native-notification smoke test:
@@ -94,10 +95,25 @@ foreground collector. Both use native notifications after catch-up. macOS
 `setup` creates only a user LaunchAgent; tests must never touch real
 LaunchAgents, TruckLedger data, or ETS2 saves.
 
+## Phase 4 API checks
+
+HTTP integration tests use temporary SQLite files and ephemeral IPv4 loopback
+ports only:
+
+```sh
+cargo test api::tests
+cargo run -- serve --help
+```
+
+`serve` is a manual development API, not collector setup. It must open only an
+existing schema-v2 database with SQLite read-only flags; tests must prove it
+does not alter schema, rows, fingerprints, or profile locators.
+
 ## Scope and safety
 
-Keep Phase 3 bounded. Do not add HTTP APIs, UI, root/system services, process
-polling, permanent polling loops, or release packaging before planned phases.
+Keep Phase 4 bounded. Do not add dashboard UI, HTTP writes, remote/LAN serving,
+root/system services, collector polling, or release packaging before planned
+phases.
 
 Never commit personal saves, profile identifiers, Steam IDs, local databases,
 or hard-coded personal paths. Original ETS2 saves must remain read-only.

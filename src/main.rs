@@ -63,6 +63,13 @@ enum Command {
         #[arg(long, default_value_t = 30, value_parser = parse_monitor_lines)]
         lines: usize,
     },
+    /// Serve the local read-only HTTP API.
+    Serve {
+        #[arg(long, default_value_t = truck_ledger::api::DEFAULT_API_PORT)]
+        port: u16,
+        #[arg(long)]
+        database: Option<PathBuf>,
+    },
 }
 
 fn database_path(database: Option<PathBuf>) -> Result<PathBuf, truck_ledger::Error> {
@@ -181,6 +188,16 @@ fn main() {
         }
         Command::Monitor { lines } => {
             if let Err(e) = truck_ledger::service::monitor(lines) {
+                eprintln!("error: {e}");
+                std::process::exit(1)
+            }
+        }
+        Command::Serve { port, database } => {
+            let database = database_path(database).unwrap_or_else(|e| {
+                eprintln!("error: {e}");
+                std::process::exit(1)
+            });
+            if let Err(e) = truck_ledger::api::serve(&database, port) {
                 eprintln!("error: {e}");
                 std::process::exit(1)
             }

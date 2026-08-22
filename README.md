@@ -96,12 +96,30 @@ path `bin/truck-ledger`; logs are `logs/collector.stdout.log` and
 platforms where persisted locators and native watcher support exist.
 `watch --profile` remains available for manual/debug use. Remove only service
 artifacts with `truck-ledger uninstall`; SQLite history and profile locators
-remain. Automatic setup/status/uninstall are macOS-only. No HTTP API/dashboard
-or Windows/Linux service installation exists yet.
+remain. Automatic setup/status/uninstall are macOS-only. Windows/Linux service
+installation is not implemented.
 
 `monitor` is optional: it shows recent collector stdout/stderr and follows new
 activity without starting collection or changing service state. Closing it with
 Ctrl+C never stops the background collector.
+
+## Development local API
+
+Phase 4 adds a manual, foreground, read-only HTTP API for dashboard
+development:
+
+```sh
+truck-ledger serve
+truck-ledger serve --port 40000
+truck-ledger serve --database /tmp/ledger.sqlite3 --port 40000
+```
+
+Default origin is `http://127.0.0.1:32947`. `serve` binds only IPv4 loopback,
+opens existing TruckLedger SQLite data read-only, and exposes versioned routes
+under `/api/v1`. It never collects saves, starts a second collector, changes
+LaunchAgent state, or modifies archived data. No dashboard exists yet; normal
+Phase 3 background collection remains independent. API `i64` domain values are
+decimal JSON strings so browser clients do not lose precision.
 
 Money and `timestamp_day` are raw ETS2 integers. Net is derived as `revenue -
 wage - maintenance - fuel`; no currency or wall-clock semantics are assumed.
@@ -123,7 +141,7 @@ storage, discover profiles and changed saves, and serve a browser dashboard on
 loopback only. Everything stays local: no cloud backend, accounts, remote sync,
 or telemetry.
 
-macOS is first tested platform. HTTP API/dashboard remain unimplemented.
+macOS is first tested platform. Dashboard remains Phase 5 work.
 
 See [ROADMAP.md](ROADMAP.md) for phased scope and acceptance criteria.
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for decoder attribution.

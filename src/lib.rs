@@ -10,6 +10,7 @@ use std::{
 };
 use walkdir::WalkDir;
 
+pub mod api;
 pub mod service;
 
 pub const FINGERPRINT_VERSION: i64 = 1;

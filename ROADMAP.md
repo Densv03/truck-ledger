@@ -124,14 +124,14 @@ artifacts are removable without deleting SQLite history.
 
 **Objective:** expose collected analytics to local clients.
 
-**Included:** local HTTP API and explicit bind-address validation; configurable
-port; loopback-only operation.
+**Included:** local read-only HTTP API; configurable port; `127.0.0.1`
+loopback-only operation.
 
 **Excluded:** remote/LAN binding, `--allow-remote`, authentication, cloud API,
 and dashboard implementation.
 
-**Acceptance:** default bind is `127.0.0.1`; `[::1]` works where practical;
-non-loopback addresses are rejected; tests cover accepted/rejected addresses.
+**Acceptance:** default bind is `127.0.0.1:32947`; `--port` changes only port;
+all application routes are under `/api/v1`; tests use ephemeral loopback ports.
 
 ## Phase 5 — web dashboard
 
