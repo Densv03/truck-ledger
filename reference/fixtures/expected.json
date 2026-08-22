@@ -1,0 +1,59 @@
+{
+  "description": "Expected logical result for hired_drivers_minimal.sii",
+  "hired_driver_count": 2,
+  "recruitment_driver_count": 1,
+  "visible_trip_count": 2,
+  "loaded_trip_count": 1,
+  "empty_trip_count": 1,
+  "total_distance_km": 2100,
+  "total_net": 3500,
+  "drivers": {
+    "driver.10": {
+      "hometown": "groningen",
+      "trip_count": 2,
+      "loaded_trip_count": 1,
+      "empty_trip_count": 1,
+      "distance_km": 2100,
+      "net": 3500,
+      "trips": [
+        {
+          "timestamp_day": 100,
+          "source_city": "groningen",
+          "destination_city": "paris",
+          "cargo": "cheese",
+          "distance": 1200,
+          "distance_on_job": true,
+          "revenue": 30000,
+          "wage": 20000,
+          "maintenance": 3000,
+          "fuel": 2000,
+          "net": 5000
+        },
+        {
+          "timestamp_day": 102,
+          "source_city": "paris",
+          "destination_city": "groningen",
+          "cargo": "",
+          "distance": 900,
+          "distance_on_job": false,
+          "revenue": 0,
+          "wage": 0,
+          "maintenance": 0,
+          "fuel": 1500,
+          "net": -1500
+        }
+      ]
+    },
+    "driver.11": {
+      "hometown": "bremen",
+      "trip_count": 0,
+      "loaded_trip_count": 0,
+      "empty_trip_count": 0,
+      "distance_km": 0,
+      "net": 0
+    }
+  },
+  "excluded_driver_ids": [
+    "driver.999"
+  ]
+}

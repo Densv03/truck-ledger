@@ -1,0 +1,10 @@
+[package]
+name = "truck-ledger"
+version = "0.1.0-alpha.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+description = "Local hired-driver history and analytics for Euro Truck Simulator 2."
+
+[dependencies]
+clap = { version = "4.5.41", features = ["derive"] }

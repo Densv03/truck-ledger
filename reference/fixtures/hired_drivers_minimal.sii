@@ -1,0 +1,128 @@
+SiiNunit
+{
+
+driver_ai : driver.10 {
+  adr: 3
+  long_dist: 4
+  heavy: 1
+  fragile: 2
+  urgent: 1
+  mechanical: 1
+
+  hometown: groningen
+  current_city: groningen
+
+  state: 1
+  experience_points: 12345
+
+  profit_log: _nameless.test.log.10
+}
+
+profit_log : _nameless.test.log.10 {
+  stats_data: 2
+  stats_data[0]: _nameless.test.trip.10.0
+  stats_data[1]: _nameless.test.trip.10.1
+
+  acc_distance_free: 0
+  acc_distance_on_job: 0
+
+  history_age: 7
+}
+
+profit_log_entry : _nameless.test.trip.10.0 {
+  revenue: 30000
+  wage: 20000
+  maintenance: 3000
+  fuel: 2000
+
+  distance: 1200
+  distance_on_job: true
+
+  cargo_count: 20
+  cargo: cheese
+
+  source_city: groningen
+  source_company: euroacres
+
+  destination_city: paris
+  destination_company: tradeaux
+
+  timestamp_day: 100
+}
+
+profit_log_entry : _nameless.test.trip.10.1 {
+  revenue: 0
+  wage: 0
+  maintenance: 0
+  fuel: 1500
+
+  distance: 900
+  distance_on_job: false
+
+  cargo_count: 0
+  cargo: ""
+
+  source_city: paris
+  source_company: tradeaux
+
+  destination_city: groningen
+  destination_company: ""
+
+  timestamp_day: 102
+}
+
+
+driver_ai : driver.11 {
+  adr: 0
+  long_dist: 2
+  heavy: 1
+  fragile: 0
+  urgent: 0
+  mechanical: 0
+
+  hometown: bremen
+  current_city: bremen
+
+  state: 1
+  experience_points: 4321
+
+  profit_log: _nameless.test.log.11
+}
+
+profit_log : _nameless.test.log.11 {
+  stats_data: 0
+
+  acc_distance_free: 0
+  acc_distance_on_job: 0
+
+  history_age: 7
+}
+
+
+driver_ai : driver.999 {
+  adr: 1
+  long_dist: 1
+  heavy: 0
+  fragile: 0
+  urgent: 0
+  mechanical: 0
+
+  hometown: ""
+  current_city: ""
+
+  state: 0
+  experience_points: 999
+
+  profit_log: _nameless.test.log.999
+}
+
+profit_log : _nameless.test.log.999 {
+  stats_data: 0
+
+  acc_distance_free: 0
+  acc_distance_on_job: 0
+
+  history_age: 7
+}
+
+}

@@ -1,0 +1,26 @@
+# Rust build output
+/target/
+
+# macOS
+.DS_Store
+
+# Local databases and SQLite sidecars
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Local environment files (keep .env.example trackable)
+.env
+.env.*
+!.env.example
+
+# Editor-local files
+.idea/
+*.swp
+*.swo

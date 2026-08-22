@@ -1,0 +1,57 @@
+# Contributing to TruckLedger
+
+## Prerequisites
+
+Install Rust **1.85** or newer. TruckLedger uses Rust edition 2024; `1.85` is
+the declared minimum supported Rust version (MSRV). Raise this baseline only
+deliberately and document why.
+
+Python 3 is needed only for manual verification of historical reference
+material. It is not a TruckLedger runtime dependency.
+
+## Local checks
+
+Run all checks before submitting changes:
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+cargo build
+cargo build --release
+```
+
+`Cargo.lock` is committed because TruckLedger is an application. Update it
+only through intentional dependency changes.
+
+## Reference fixture verification
+
+`reference/` is historical evidence, not production code. Its sanitized
+fixture can be checked manually with its historical Python prototype. Use a
+temporary database; do not create one in the repository:
+
+```sh
+tmp_dir="$(mktemp -d)"
+python3 reference/prototype/ets2_driver_ledger.py \
+  --db "$tmp_dir/ledger.sqlite3" \
+  ingest reference/fixtures/hired_drivers_minimal.sii
+python3 reference/prototype/ets2_driver_ledger.py \
+  --db "$tmp_dir/ledger.sqlite3" \
+  ingest reference/fixtures/hired_drivers_minimal.sii
+rm -rf "$tmp_dir"
+```
+
+Expected behavior: two hired drivers and two visible trips; first import adds
+two trips, second import adds zero. This check does not belong in `cargo test`.
+Phase 1 will reuse sanitized fixtures for production Rust tests.
+
+## Scope and safety
+
+Keep Phase 0 minimal. Do not add future subcommands, placeholder modules,
+parsers, SQLite code, watchers, HTTP APIs, or UI before their planned phases.
+
+Never commit personal saves, profile identifiers, Steam IDs, local databases,
+or hard-coded personal paths. Original ETS2 saves must remain read-only.
+
+TruckLedger uses MIT licensing. Preserve attribution and separate provenance
+for material under `reference/`.
