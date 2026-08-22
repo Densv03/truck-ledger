@@ -60,6 +60,9 @@ tests using sanitized fixtures.
 original saves; fixture behavior passes production tests; SQLite deduplicates
 within profile; repeated import is idempotent.
 
+**Status:** Phase 1 implementation and local regression coverage present.
+Phase 2 discovery and collection work remains incomplete.
+
 Profile scope is separate from content fingerprinting. Drivers are unique by
 profile plus raw ETS2 driver ID. Trip uniqueness is
 `(profile_id, fingerprint_version, fingerprint)`; v1 hash includes raw driver

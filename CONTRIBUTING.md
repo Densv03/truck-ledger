@@ -19,6 +19,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo build
 cargo build --release
+cargo run -- --help
+cargo run -- --version
 ```
 
 `Cargo.lock` is committed because TruckLedger is an application. Update it
@@ -44,6 +46,15 @@ rm -rf "$tmp_dir"
 Expected behavior: two hired drivers and two visible trips; first import adds
 two trips, second import adds zero. This check does not belong in `cargo test`.
 Phase 1 will reuse sanitized fixtures for production Rust tests.
+
+Phase 1 CLI smoke test:
+
+```sh
+tmp_dir="$(mktemp -d)"
+cargo run -- ingest --profile fixture-profile --input reference/fixtures/hired_drivers_minimal.sii --database "$tmp_dir/ledger.sqlite3"
+cargo run -- ingest --profile fixture-profile --input reference/fixtures/hired_drivers_minimal.sii --database "$tmp_dir/ledger.sqlite3"
+rm -rf "$tmp_dir"
+```
 
 ## Scope and safety
 
