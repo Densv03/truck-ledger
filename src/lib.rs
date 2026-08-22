@@ -10,6 +10,8 @@ use std::{
 };
 use walkdir::WalkDir;
 
+pub mod service;
+
 pub const FINGERPRINT_VERSION: i64 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -595,6 +597,21 @@ pub fn load_profile_location(conn: &Connection, scope: &str) -> Result<ProfileLo
     Ok(location)
 }
 
+/// Lists every configured scope without validating its saved locator.  Service
+/// status needs this to describe broken configuration instead of hiding it.
+pub fn configured_profile_scopes(conn: &Connection) -> Result<Vec<String>, Error> {
+    let mut statement = conn
+        .prepare(
+            "SELECT p.scope_key FROM profiles p JOIN profile_locations l ON l.profile_id=p.id ORDER BY p.scope_key",
+        )
+        .map_err(db_err)?;
+    statement
+        .query_map([], |row| row.get(0))
+        .map_err(db_err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(db_err)
+}
+
 fn candidate(profile_root: PathBuf, layout_kind: &str) -> Result<ProfileCandidate, Error> {
     real_directory(&profile_root, "candidate profile root")?;
     let save_root = profile_root.join("save");
@@ -921,6 +938,164 @@ pub fn print_summary(label: &str, summary: &CollectionSummary) {
         summary.trips_scanned,
         summary.inserted
     );
+}
+
+#[derive(Debug, Clone)]
+struct CollectRoot {
+    save_root: PathBuf,
+    scopes: Vec<String>,
+}
+
+fn configured_collect_roots(conn: &Connection) -> Result<Vec<CollectRoot>, Error> {
+    let mut roots: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
+    for scope in configured_profile_scopes(conn)? {
+        match load_profile_location(conn, &scope) {
+            Ok(location) => {
+                let save_root = location.profile_root.join("save");
+                roots.entry(save_root).or_default().push(scope);
+            }
+            Err(error) => eprintln!("configured profile invalid: {scope}: {error}"),
+        }
+    }
+    Ok(roots
+        .into_iter()
+        .map(|(save_root, scopes)| CollectRoot { save_root, scopes })
+        .collect())
+}
+
+fn collect_root(
+    conn: &mut Connection,
+    root: &CollectRoot,
+) -> Result<Vec<(String, CollectionSummary)>, Error> {
+    let mut results = root
+        .scopes
+        .iter()
+        .cloned()
+        .map(|scope| {
+            (
+                scope,
+                CollectionSummary {
+                    files: 0,
+                    ..Default::default()
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let files = discover_save_files(&root.save_root)?;
+    for (_, summary) in &mut results {
+        summary.files = files.len();
+    }
+    for source in files {
+        let drivers = match retry_source(
+            || {
+                let metadata = fs::symlink_metadata(&source).map_err(|e| {
+                    Error::Io(format!("cannot inspect save {}: {e}", source.display()))
+                })?;
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    return Err(Error::Input(format!(
+                        "save is not a real regular file: {}",
+                        source.display()
+                    )));
+                }
+                let snapshot = tempfile::NamedTempFile::new()
+                    .map_err(|e| Error::Io(format!("cannot create save snapshot: {e}")))?;
+                fs::copy(&source, snapshot.path()).map_err(|e| {
+                    Error::Io(format!("cannot snapshot save {}: {e}", source.display()))
+                })?;
+                let raw = fs::read(snapshot.path())
+                    .map_err(|e| Error::Io(format!("cannot read save snapshot: {e}")))?;
+                extract(&decode_input(&raw)?)
+            },
+            std::thread::sleep,
+        )? {
+            Ok(drivers) => drivers,
+            Err(error) => {
+                eprintln!(
+                    "save failed: {}: retry exhausted: {error}",
+                    source.display()
+                );
+                for (_, summary) in &mut results {
+                    summary.failed += 1;
+                }
+                continue;
+            }
+        };
+        for (scope, summary) in &mut results {
+            summary.add(ingest(conn, scope, &drivers)?);
+        }
+    }
+    Ok(results)
+}
+
+/// Foreground multi-profile collector. It has no service-manager dependency.
+pub fn collect(conn: &mut Connection) -> Result<(), Error> {
+    let roots = configured_collect_roots(conn)?;
+    if roots.is_empty() {
+        return Err(Error::Input(
+            "no valid configured profiles to monitor; run setup with --profile-root".into(),
+        ));
+    }
+    let (sender, receiver) = mpsc::channel();
+    let mut watcher = notify::recommended_watcher(move |event| {
+        let _ = sender.send(event);
+    })
+    .map_err(|e| Error::Io(format!("watcher initialization failed: {e}")))?;
+    use notify::Watcher;
+    for root in &roots {
+        watcher
+            .watch(&root.save_root, notify::RecursiveMode::Recursive)
+            .map_err(|e| {
+                Error::Io(format!(
+                    "watcher initialization failed for {}: {e}",
+                    root.save_root.display()
+                ))
+            })?;
+        for (scope, summary) in collect_root(conn, root)? {
+            print_summary(&format!("catch-up [{scope}]"), &summary);
+        }
+        println!("watching: {}", root.save_root.display());
+    }
+    loop {
+        let event = receiver
+            .recv()
+            .map_err(|_| Error::Io("watcher event channel failed".into()))?
+            .map_err(|e| Error::Io(format!("watcher event failed: {e}")))?;
+        let mut changed = roots
+            .iter()
+            .filter(|root| event_is_relevant(&root.save_root, &event.paths))
+            .map(|root| root.save_root.clone())
+            .collect::<Vec<_>>();
+        if changed.is_empty() {
+            continue;
+        }
+        let mut deadline = Instant::now() + DEBOUNCE;
+        loop {
+            match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(Ok(next)) => {
+                    for root in &roots {
+                        if event_is_relevant(&root.save_root, &next.paths)
+                            && !changed.contains(&root.save_root)
+                        {
+                            changed.push(root.save_root.clone());
+                        }
+                    }
+                    deadline = Instant::now() + DEBOUNCE;
+                }
+                Ok(Err(error)) => return Err(Error::Io(format!("watcher event failed: {error}"))),
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(Error::Io("watcher event channel failed".into()));
+                }
+            }
+        }
+        for root in &roots {
+            if changed.contains(&root.save_root) {
+                for (scope, summary) in collect_root(conn, root)? {
+                    print_summary(&format!("collection pass [{scope}]"), &summary);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1417,6 +1592,62 @@ mod tests {
         assert_eq!(summary.drivers_scanned, 6);
         assert_eq!(summary.trips_scanned, 6);
         assert_eq!(summary.inserted, 2);
+    }
+
+    #[test]
+    fn multi_profile_collection_groups_shared_save_root_and_preserves_scope_identity() {
+        let td = tempfile::tempdir().unwrap();
+        let root = profile(td.path());
+        let game = root.join("save/autosave/game.sii");
+        fs::write(&game, fixture()).unwrap();
+        let mut conn = open_database(&td.path().join("ledger.db")).unwrap();
+        let location = validate_profile_root(&root).unwrap();
+        associate_profile_location(&mut conn, "first", &location).unwrap();
+        associate_profile_location(&mut conn, "second", &location).unwrap();
+        let roots = configured_collect_roots(&conn).unwrap();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].scopes, ["first", "second"]);
+        let summaries = collect_root(&mut conn, &roots[0]).unwrap();
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(read_trips(&conn, "first").unwrap().len(), 2);
+        assert_eq!(read_trips(&conn, "second").unwrap().len(), 2);
+        assert_ne!(
+            conn.query_row::<i64, _, _>(
+                "SELECT id FROM profiles WHERE scope_key='first'",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            conn.query_row::<i64, _, _>(
+                "SELECT id FROM profiles WHERE scope_key='second'",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+        );
+    }
+
+    #[test]
+    fn configured_collection_isolates_invalid_locator_from_valid_root() {
+        let td = tempfile::tempdir().unwrap();
+        let valid = profile(&td.path().join("valid"));
+        fs::write(valid.join("save/autosave/game.sii"), fixture()).unwrap();
+        let invalid = profile(&td.path().join("invalid"));
+        let mut conn = open_database(&td.path().join("ledger.db")).unwrap();
+        associate_profile_location(&mut conn, "valid", &validate_profile_root(&valid).unwrap())
+            .unwrap();
+        associate_profile_location(
+            &mut conn,
+            "invalid",
+            &validate_profile_root(&invalid).unwrap(),
+        )
+        .unwrap();
+        fs::remove_dir_all(invalid.join("save")).unwrap();
+        let roots = configured_collect_roots(&conn).unwrap();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].scopes, ["valid"]);
+        collect_root(&mut conn, &roots[0]).unwrap();
+        assert_eq!(read_trips(&conn, "valid").unwrap().len(), 2);
     }
 
     #[test]

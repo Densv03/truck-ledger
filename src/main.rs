@@ -11,6 +11,16 @@ struct Cli {
     #[command(subcommand)]
     command: Command,
 }
+fn parse_monitor_lines(value: &str) -> Result<usize, String> {
+    let lines = value
+        .parse::<usize>()
+        .map_err(|_| "--lines must be an integer".to_string())?;
+    if (1..=200).contains(&lines) {
+        Ok(lines)
+    } else {
+        Err("--lines must be between 1 and 200".into())
+    }
+}
 #[derive(Subcommand)]
 enum Command {
     Ingest {
@@ -34,6 +44,24 @@ enum Command {
         profile_root: Option<PathBuf>,
         #[arg(long)]
         database: Option<PathBuf>,
+    },
+    /// Foreground collector for every persisted profile locator.
+    Collect,
+    /// Install/update macOS background collection for all configured profiles.
+    Setup {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        profile_root: Option<PathBuf>,
+    },
+    /// Inspect local macOS collector installation without collecting saves.
+    Status,
+    /// Stop/remove macOS service artifacts while preserving history.
+    Uninstall,
+    /// Follow background collector activity.
+    Monitor {
+        #[arg(long, default_value_t = 30, value_parser = parse_monitor_lines)]
+        lines: usize,
     },
 }
 
@@ -120,6 +148,39 @@ fn main() {
                 }),
             };
             if let Err(e) = truck_ledger::watch(&mut db, &profile, &location) {
+                eprintln!("error: {e}");
+                std::process::exit(1)
+            }
+        }
+        Command::Collect => {
+            if let Err(e) = truck_ledger::service::collect() {
+                eprintln!("error: {e}");
+                std::process::exit(1)
+            }
+        }
+        Command::Setup {
+            profile,
+            profile_root,
+        } => {
+            if let Err(e) = truck_ledger::service::setup(profile.as_deref(), profile_root) {
+                eprintln!("error: {e}");
+                std::process::exit(1)
+            }
+        }
+        Command::Status => {
+            if let Err(e) = truck_ledger::service::status() {
+                eprintln!("error: {e}");
+                std::process::exit(1)
+            }
+        }
+        Command::Uninstall => {
+            if let Err(e) = truck_ledger::service::uninstall() {
+                eprintln!("error: {e}");
+                std::process::exit(1)
+            }
+        }
+        Command::Monitor { lines } => {
+            if let Err(e) = truck_ledger::service::monitor(lines) {
                 eprintln!("error: {e}");
                 std::process::exit(1)
             }

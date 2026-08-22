@@ -71,6 +71,11 @@ cargo build
 cargo build --release
 cargo run -- discover --help
 cargo run -- watch --help
+cargo run -- collect --help
+cargo run -- setup --help
+cargo run -- status --help
+cargo run -- uninstall --help
+cargo run -- monitor --help
 ```
 
 Optional macOS native-notification smoke test:
@@ -84,15 +89,15 @@ It is supplementary, not a normal quality gate. Real macOS Steam Cloud ETS2
 end-to-end watcher collection has been manually verified separately.
 
 Do not make normal tests depend on filesystem-event timing. `watch` is a
-foreground collector: it performs initial catch-up, then waits for native
-filesystem notifications. It has no service installation or automatic login
-startup in Phase 2.
+single-profile foreground collector; `collect` is persisted multi-profile
+foreground collector. Both use native notifications after catch-up. macOS
+`setup` creates only a user LaunchAgent; tests must never touch real
+LaunchAgents, TruckLedger data, or ETS2 saves.
 
 ## Scope and safety
 
-Keep Phase 2 bounded. Do not add HTTP APIs, UI, service installation,
-background startup, process polling, or permanent polling loops before their
-planned phases.
+Keep Phase 3 bounded. Do not add HTTP APIs, UI, root/system services, process
+polling, permanent polling loops, or release packaging before planned phases.
 
 Never commit personal saves, profile identifiers, Steam IDs, local databases,
 or hard-coded personal paths. Original ETS2 saves must remain read-only.

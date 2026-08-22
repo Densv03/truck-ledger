@@ -107,7 +107,20 @@ out.
 Persistent data uses a platform-standard per-user application-data directory
 with testable path resolution and explicit override. Tests use temporary paths.
 
-## Phase 3 — local HTTP API
+## Phase 3 — macOS setup + background collector lifecycle
+
+**Objective:** install one user LaunchAgent running event-driven collection.
+
+**Included:** managed executable, status/uninstall, native watcher collector
+for all configured profile locators, user-level launchd lifecycle.
+
+**Excluded:** root daemons, polling, HTTP/UI, packaging, Windows/Linux service
+installation.
+
+**Acceptance:** setup is idempotent, collector starts at login, service
+artifacts are removable without deleting SQLite history.
+
+## Phase 4 — local HTTP API
 
 **Objective:** expose collected analytics to local clients.
 
@@ -120,29 +133,17 @@ and dashboard implementation.
 **Acceptance:** default bind is `127.0.0.1`; `[::1]` works where practical;
 non-loopback addresses are rejected; tests cover accepted/rejected addresses.
 
-## Phase 4 — local web dashboard
+## Phase 5 — web dashboard
 
 **Objective:** present useful hired-driver history in a browser.
 
 **Included:** minimal dashboard consuming local API; clear local-only UX.
 
-**Excluded:** native desktop GUI, mobile interface, maps, advanced garage/cargo
-analytics, framework adoption without demonstrated need.
+**Excluded:** native desktop GUI, mobile interface, maps, advanced
+garage/cargo analytics, framework adoption without demonstrated need.
 
 **Acceptance:** browser dashboard displays collected data through loopback API;
-no remote dependency/account is required.
-
-## Phase 5 — operations and installation UX
-
-**Objective:** make recurring local use understandable and reliable.
-
-**Included:** background-service/installation UX and operational commands.
-
-**Excluded:** auto-update, Windows installer/service integration, menu-bar/tray
-apps, cloud operation.
-
-**Acceptance:** macOS tested operational flow starts, reports status, and
-stops cleanly; failures provide actionable local diagnostics.
+no remote dependency/account required.
 
 ## Phase 6 — release engineering
 
