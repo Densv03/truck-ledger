@@ -4,8 +4,17 @@ use serde_json::Value;
 use std::{
     io::{Read, Write},
     net::TcpStream,
+    sync::{Mutex, MutexGuard, OnceLock},
     time::Duration,
 };
+
+fn http_test_guard() -> MutexGuard<'static, ()> {
+    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn fixture() -> String {
     include_str!("../../../reference/fixtures/hired_drivers_minimal.sii").into()
@@ -89,6 +98,7 @@ fn request(port: u16, method: &str, path: &str) -> (u16, Vec<(String, String)>, 
 
 #[test]
 fn http_api_driver_stats_reconcile_summary_and_preserve_read_only_state() {
+    let _guard = http_test_guard();
     let td = tempfile::tempdir().unwrap();
     let path = td.path().join("ledger.sqlite3");
     let mut db = open_database(&path).unwrap();
@@ -252,6 +262,7 @@ fn http_api_driver_stats_reconcile_summary_and_preserve_read_only_state() {
 
 #[test]
 fn http_api_driver_stats_overflows_are_controlled() {
+    let _guard = http_test_guard();
     for trips in [
         vec![trip(1, i64::MIN, 1, 0, 0, 0, true)],
         vec![
@@ -290,6 +301,7 @@ fn http_api_driver_stats_overflows_are_controlled() {
 
 #[test]
 fn http_server_serves_embedded_dashboard_assets() {
+    let _guard = http_test_guard();
     let td = tempfile::tempdir().unwrap();
     let db_path = td.path().join("ledger.sqlite3");
     let db = open_database(&db_path).unwrap();
@@ -330,6 +342,7 @@ fn http_server_serves_embedded_dashboard_assets() {
 
 #[test]
 fn http_server_rejects_unknown_and_traversal_static_paths() {
+    let _guard = http_test_guard();
     let td = tempfile::tempdir().unwrap();
     let db_path = td.path().join("ledger.sqlite3");
     let db = open_database(&db_path).unwrap();
@@ -350,6 +363,7 @@ fn http_server_rejects_unknown_and_traversal_static_paths() {
 
 #[test]
 fn http_api_serves_read_only_fixture_data() {
+    let _guard = http_test_guard();
     let td = tempfile::tempdir().unwrap();
     let db_path = td.path().join("ledger.sqlite3");
     let mut db = open_database(&db_path).unwrap();
@@ -494,6 +508,7 @@ fn http_api_serves_read_only_fixture_data() {
 
 #[test]
 fn http_api_preserves_i64_precision_and_paginates() {
+    let _guard = http_test_guard();
     let td = tempfile::tempdir().unwrap();
     let path = td.path().join("db.sqlite3");
     let mut db = open_database(&path).unwrap();
@@ -523,6 +538,7 @@ fn http_api_preserves_i64_precision_and_paginates() {
 
 #[test]
 fn http_api_rejects_absent_and_non_v2_databases_before_binding() {
+    let _guard = http_test_guard();
     let td = tempfile::tempdir().unwrap();
     let missing = td.path().join("missing.sqlite3");
     assert!(start_for_tests(&missing, 0).is_err());
@@ -539,6 +555,7 @@ fn http_api_rejects_absent_and_non_v2_databases_before_binding() {
 
 #[test]
 fn http_api_rejects_occupied_port_and_allows_collector_style_write() {
+    let _guard = http_test_guard();
     let td = tempfile::tempdir().unwrap();
     let path = td.path().join("db.sqlite3");
     let mut writer = open_database(&path).unwrap();
@@ -567,6 +584,7 @@ fn http_api_rejects_occupied_port_and_allows_collector_style_write() {
 
 #[test]
 fn http_api_maps_busy_and_later_schema_change_to_controlled_errors() {
+    let _guard = http_test_guard();
     let td = tempfile::tempdir().unwrap();
     let path = td.path().join("db.sqlite3");
     let mut writer = open_database(&path).unwrap();

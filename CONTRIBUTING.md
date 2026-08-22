@@ -15,10 +15,10 @@ Run all checks before submitting changes:
 
 ```sh
 cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-cargo build
-cargo build --release
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked
+cargo build --locked
+cargo build --release --locked
 cargo run -- --help
 cargo run -- --version
 git diff --check
@@ -27,6 +27,30 @@ git diff -- reference
 
 `Cargo.lock` is committed because TruckLedger is an application. Update it
 only through intentional dependency changes.
+
+## macOS package and release validation
+
+Build unsigned local developer package without Apple credentials:
+
+```sh
+cargo build --release --locked
+./packaging/macos/build-pkg.sh --output-dir dist
+./packaging/macos/validate-pkg.sh --pkg dist/truck-ledger-<version>-macos-<architecture>.pkg
+```
+
+`build-pkg.sh` derives Cargo package version and inspects native release binary
+for one supported slice. It packages only `/usr/local/bin/truck-ledger` with
+identifier `com.truckledger.cli`; validator expands without installing and
+checks metadata, payload, permissions, binary version, architecture, and BOM.
+
+Production tags must equal `v${Cargo package version}`. Release workflow builds
+unsigned native arm64 and x86_64 installers with
+`MACOSX_DEPLOYMENT_TARGET=13.0`, validates package contents, then hashes final
+package bytes before publishing both architectures together. It requires no
+Apple Developer credentials. Current releases are unsigned and non-notarized;
+README documents checksum verification and macOS per-installer Open Anyway
+approval. Developer ID signing/notarization may be added later if project
+funding/resources make it appropriate.
 
 ## Reference fixture verification
 
@@ -65,10 +89,10 @@ Steam or ETS2 data. Run normal verification with:
 
 ```sh
 cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-cargo build
-cargo build --release
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked
+cargo build --locked
+cargo build --release --locked
 cargo run -- discover --help
 cargo run -- watch --help
 cargo run -- collect --help

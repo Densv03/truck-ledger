@@ -9,7 +9,7 @@ use std::path::PathBuf;
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 fn parse_monitor_lines(value: &str) -> Result<usize, String> {
     let lines = value
@@ -79,7 +79,13 @@ fn database_path(database: Option<PathBuf>) -> Result<PathBuf, crate::Error> {
 }
 pub fn run() {
     let cli = Cli::parse();
-    match cli.command {
+    let Some(command) = cli.command else {
+        println!(
+            "TruckLedger stores local ETS2 hired-driver history.\n\nFirst run:\n  truck-ledger setup\n\nNext commands:\n  truck-ledger status\n  truck-ledger monitor\n  truck-ledger serve\n\nRun `truck-ledger --help` for all commands."
+        );
+        return;
+    };
+    match command {
         Command::Ingest {
             profile,
             input,
@@ -203,5 +209,16 @@ pub fn run() {
                 std::process::exit(1)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_command_parses_without_a_subcommand() {
+        let cli = Cli::try_parse_from(["truck-ledger"]).unwrap();
+        assert!(cli.command.is_none());
     }
 }

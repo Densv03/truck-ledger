@@ -5,13 +5,97 @@ Simulator 2 (ETS2). ETS2 retains only a short rolling window of hired-driver
 profit history in save files; TruckLedger is intended to collect that history
 locally before it disappears.
 
-TruckLedger is pre-v0.1 and under development. Phase 2 imports explicit saves
-and can collect a selected ETS2 profile in foreground:
+TruckLedger supports macOS 13 Ventura or later. Everything stays local:
+TruckLedger reads ETS2 saves without changing them and stores history in local
+application data.
+
+## Install on macOS
+
+1. Download matching installer from [GitHub Releases](../../releases):
+   - Apple Silicon (M-series): `truck-ledger-<version>-macos-arm64.pkg`
+   - Intel Mac: `truck-ledger-<version>-macos-x86_64.pkg`
+2. Open `.pkg` and complete normal macOS installation. It installs only
+   `/usr/local/bin/truck-ledger`; no shell profile or PATH edits are needed.
+3. Open Terminal once and run:
+
+   ```sh
+   truck-ledger setup
+   ```
+
+4. Play ETS2 normally. First setup discovers one unambiguous ETS2 profile;
+   multiple profiles require explicit selection described below.
+
+Current packages are unsigned and not notarized because TruckLedger does not
+currently maintain paid Apple Developer Program membership. Download only from
+official GitHub Release and verify published SHA-256 checksum before opening:
 
 ```sh
-truck-ledger ingest --profile fixture-profile --input game.sii
-truck-ledger ingest --profile fixture-profile --input decoded.sii --database /tmp/ledger.sqlite3
+shasum -a 256 -c truck-ledger-<version>-macos-<architecture>.pkg.sha256
 ```
+
+macOS may block unsigned package. Use System Settings → Privacy & Security →
+Open Anyway for this specific installer if you choose to proceed. Do not disable
+Gatekeeper globally. Developer ID signing and notarization may be added later
+if project funding/resources make them appropriate.
+
+Check background collection with `truck-ledger status`; follow collector logs
+with `truck-ledger monitor`. Start local dashboard manually with
+`truck-ledger serve`, then open `http://127.0.0.1:32947/`.
+
+`setup` manages user LaunchAgent and a refreshed runtime copy beneath
+TruckLedger app data. System installer never installs LaunchAgent. History,
+profile locators, and collector logs remain in per-user application data and
+survive package upgrades.
+
+### Remove TruckLedger
+
+Remove managed collector first; this preserves SQLite history, profile
+configuration, logs, and ETS2 saves:
+
+```sh
+truck-ledger uninstall
+```
+
+Then remove system-installed CLI and its receipt:
+
+```sh
+sudo rm /usr/local/bin/truck-ledger
+sudo pkgutil --forget com.truckledger.cli
+```
+
+`pkgutil --forget` removes receipt only, not files. CLI-only removal leaves an
+already configured managed collector in place. Neither removal route deletes
+TruckLedger history/database; `.pkg` contains no uninstall scripts.
+
+## Developer/source installation
+
+TruckLedger is pre-v0.1 and needs Rust **1.85** or newer for source builds.
+Install from checkout with:
+
+```sh
+cargo install --path . --locked
+```
+
+Or run commands directly while developing:
+
+```sh
+cargo run -- ingest --profile fixture-profile --input game.sii
+cargo run -- ingest --profile fixture-profile --input decoded.sii --database /tmp/ledger.sqlite3
+```
+
+Build unsigned local developer package (not signed/notarized compatibility
+release artifact):
+
+```sh
+cargo build --release --locked
+./packaging/macos/build-pkg.sh --output-dir dist
+./packaging/macos/validate-pkg.sh --pkg dist/truck-ledger-<version>-macos-<architecture>.pkg
+```
+
+Local package script derives version and architecture from Cargo/binary. It
+accepts one native `arm64` or `x86_64` slice only; requires no Apple account.
+For macOS 13 compatibility certification, build local artifact with
+`MACOSX_DEPLOYMENT_TARGET=13.0` as production release does.
 
 Default data is stored in platform local application data under
 `truck-ledger/truck-ledger.sqlite3`.

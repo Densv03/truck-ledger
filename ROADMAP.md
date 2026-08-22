@@ -154,11 +154,11 @@ driver-filtered paginated trips, and manual refresh.
 
 **Objective:** prepare public v0.1 distribution.
 
-**Included:** packaged binaries, Homebrew tap, release documentation, public
-v0.1 release work.
+**Included:** architecture-specific signed and notarized macOS `.pkg` releases,
+release documentation, and public v0.1 release work.
 
-**Excluded:** unplanned product expansion or platform integrations outside
-v0.1 contract.
+**Excluded:** Homebrew packaging, universal binaries, Windows/Linux packaging,
+and unplanned product expansion or platform integrations outside v0.1 contract.
 
 **Acceptance:** reproducible packaged release; documented install/use/upgrade
 path; quality gates and release checks pass; public v0.1 artifacts published.

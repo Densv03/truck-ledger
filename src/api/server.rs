@@ -81,23 +81,39 @@ pub(crate) fn static_response(
 
 pub struct ApiServer {
     address: SocketAddr,
-    shutdown: Sender<()>,
-    thread: JoinHandle<()>,
+    shutdown: Option<Sender<()>>,
+    thread: Option<JoinHandle<()>>,
 }
 impl ApiServer {
     pub fn address(&self) -> SocketAddr {
         self.address
     }
     #[allow(dead_code)]
-    pub fn shutdown(self) {
-        let _ = self.shutdown.send(());
-        let _ = self.thread.join();
+    pub fn shutdown(mut self) {
+        self.stop();
+    }
+
+    fn stop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for ApiServer {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 pub fn start_for_tests(database: &Path, port: u16) -> Result<ApiServer, crate::Error> {
     validate_database(database)?;
-    let server = Server::http(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
-        .map_err(|e| crate::Error::Io(format!("cannot bind local API: {e}")))?;
+    let server =
+        Server::http(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)).map_err(|e| {
+            crate::Error::Io(format!("cannot bind local API: display={e}; debug={e:?}"))
+        })?;
     let address = server
         .server_addr()
         .to_ip()
@@ -117,8 +133,8 @@ pub fn start_for_tests(database: &Path, port: u16) -> Result<ApiServer, crate::E
     });
     Ok(ApiServer {
         address,
-        shutdown: shutdown_tx,
-        thread,
+        shutdown: Some(shutdown_tx),
+        thread: Some(thread),
     })
 }
 pub fn serve(database: &Path, port: u16) -> Result<(), crate::Error> {
