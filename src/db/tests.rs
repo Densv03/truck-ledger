@@ -1,6 +1,7 @@
 use crate::*;
 use rusqlite::OptionalExtension;
 use rusqlite::{Connection, params};
+use std::fmt::Write as _;
 use std::fs;
 fn fixture() -> String {
     include_str!("../../reference/fixtures/hired_drivers_minimal.sii").into()
@@ -62,10 +63,10 @@ fn fingerprint_ignores_source_references() {
 fn fingerprint_v1_fixture_golden_bytes() {
     let drivers = extract(&fixture()).unwrap();
     let actual = fingerprint(&drivers[0].raw_id, &drivers[0].trips[0]);
-    let hex = actual
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let mut hex = String::new();
+    for byte in actual {
+        write!(&mut hex, "{byte:02x}").unwrap();
+    }
     assert_eq!(
         hex,
         "92b030b3808f6442498e61e796e85e042a0e14b5fd4a3f236ff78f5789d488a9"

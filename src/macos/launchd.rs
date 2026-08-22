@@ -90,7 +90,7 @@ pub(crate) struct Env<'a> {
     pub(crate) uid: u32,
     pub(crate) launchctl: &'a dyn Launchctl,
 }
-impl<'a> Env<'a> {
+impl Env<'_> {
     pub(crate) fn domain(&self) -> String {
         format!("gui/{}", self.uid)
     }
