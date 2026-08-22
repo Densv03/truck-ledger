@@ -1,4 +1,10 @@
 //! macOS LaunchAgent lifecycle. Internal seams exist only for deterministic tests.
+#[cfg(test)]
+use super::{
+    monitor::{monitor_new_lines, monitor_read, monitor_recent},
+    service::{install_service, setup_auto_with, status_with, uninstall_with},
+};
+#[allow(unused_imports)]
 use crate::{
     Error, ProfileLocation, associate_profile_location, configured_profile_scopes,
     default_database_path, discover_default, load_profile_location, open_database,
@@ -7,7 +13,7 @@ use crate::{
 use directories::BaseDirs;
 use std::{
     fs,
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -17,16 +23,16 @@ const PLIST_NAME: &str = "truck-ledger.collector.plist";
 const THROTTLE_SECONDS: u32 = 60;
 
 #[derive(Clone, Debug)]
-struct Paths {
-    data: PathBuf,
-    database: PathBuf,
-    binary: PathBuf,
-    plist: PathBuf,
-    stdout: PathBuf,
-    stderr: PathBuf,
+pub(crate) struct Paths {
+    pub(crate) data: PathBuf,
+    pub(crate) database: PathBuf,
+    pub(crate) binary: PathBuf,
+    pub(crate) plist: PathBuf,
+    pub(crate) stdout: PathBuf,
+    pub(crate) stderr: PathBuf,
 }
 
-fn production_paths() -> Result<Paths, Error> {
+pub(crate) fn production_paths() -> Result<Paths, Error> {
     let database = default_database_path()?;
     let data = database
         .parent()
@@ -47,15 +53,15 @@ fn production_paths() -> Result<Paths, Error> {
 }
 
 #[derive(Clone, Debug)]
-struct LaunchResult {
+pub(crate) struct LaunchResult {
     status: i32,
-    stdout: String,
-    stderr: String,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
 }
-trait Launchctl {
+pub(crate) trait Launchctl {
     fn run(&self, args: &[String]) -> Result<LaunchResult, Error>;
 }
-struct RealLaunchctl;
+pub(crate) struct RealLaunchctl;
 impl Launchctl for RealLaunchctl {
     fn run(&self, args: &[String]) -> Result<LaunchResult, Error> {
         let o = Command::new("launchctl")
@@ -74,26 +80,26 @@ unsafe extern "C" {
     fn getuid() -> u32;
 }
 #[cfg(target_os = "macos")]
-fn real_uid() -> u32 {
+pub(crate) fn real_uid() -> u32 {
     unsafe { getuid() }
 }
 
-struct Env<'a> {
-    paths: Paths,
-    source: PathBuf,
-    uid: u32,
-    launchctl: &'a dyn Launchctl,
+pub(crate) struct Env<'a> {
+    pub(crate) paths: Paths,
+    pub(crate) source: PathBuf,
+    pub(crate) uid: u32,
+    pub(crate) launchctl: &'a dyn Launchctl,
 }
 impl<'a> Env<'a> {
-    fn domain(&self) -> String {
+    pub(crate) fn domain(&self) -> String {
         format!("gui/{}", self.uid)
     }
-    fn target(&self) -> String {
+    pub(crate) fn target(&self) -> String {
         format!("{}/{}", self.domain(), SERVICE_LABEL)
     }
 }
 
-fn xml(value: &str) -> Result<String, Error> {
+pub(crate) fn xml(value: &str) -> Result<String, Error> {
     if value
         .chars()
         .any(|c| matches!(c, '\0'..='\u{8}'|'\u{b}'|'\u{c}'|'\u{e}'..='\u{1f}'))
@@ -109,7 +115,7 @@ fn xml(value: &str) -> Result<String, Error> {
         .replace('"', "&quot;")
         .replace('\'', "&apos;"))
 }
-fn plist(paths: &Paths) -> Result<String, Error> {
+pub(crate) fn plist(paths: &Paths) -> Result<String, Error> {
     let text = |p: &Path| xml(&p.to_string_lossy());
     Ok(format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>Label</key><string>{}</string>\n<key>ProgramArguments</key><array><string>{}</string><string>collect</string></array>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><true/>\n<key>ThrottleInterval</key><integer>{}</integer>\n<key>StandardOutPath</key><string>{}</string>\n<key>StandardErrorPath</key><string>{}</string>\n</dict></plist>\n",
@@ -120,7 +126,7 @@ fn plist(paths: &Paths) -> Result<String, Error> {
         text(&paths.stderr)?
     ))
 }
-fn stage(
+pub(crate) fn stage(
     destination: &Path,
     bytes: &[u8],
     executable: bool,
@@ -143,7 +149,7 @@ fn stage(
     }
     Ok(f)
 }
-fn stage_binary(env: &Env<'_>) -> Result<tempfile::NamedTempFile, Error> {
+pub(crate) fn stage_binary(env: &Env<'_>) -> Result<tempfile::NamedTempFile, Error> {
     let meta = fs::metadata(&env.source).map_err(|e| {
         Error::Io(format!(
             "cannot inspect current executable {}: {e}",
@@ -159,19 +165,19 @@ fn stage_binary(env: &Env<'_>) -> Result<tempfile::NamedTempFile, Error> {
         .map_err(|e| Error::Io(format!("cannot read current executable: {e}")))?;
     stage(&env.paths.binary, &bytes, true)
 }
-fn replace(staged: tempfile::NamedTempFile, final_path: &Path) -> Result<(), Error> {
+pub(crate) fn replace(staged: tempfile::NamedTempFile, final_path: &Path) -> Result<(), Error> {
     fs::rename(staged.path(), final_path)
         .map_err(|e| Error::Io(format!("cannot install {}: {e}", final_path.display())))
 }
-fn not_loaded(stderr: &str) -> bool {
+pub(crate) fn not_loaded(stderr: &str) -> bool {
     stderr.contains("Could not find service") || stderr.contains("No such process")
 }
-enum Inspection {
+pub(crate) enum Inspection {
     Loaded,
     NotLoaded,
     Unavailable(String),
 }
-fn inspect(env: &Env<'_>) -> Result<Inspection, Error> {
+pub(crate) fn inspect(env: &Env<'_>) -> Result<Inspection, Error> {
     let r = env.launchctl.run(&["print".into(), env.target()])?;
     if r.status == 0 {
         Ok(Inspection::Loaded)
@@ -184,7 +190,7 @@ fn inspect(env: &Env<'_>) -> Result<Inspection, Error> {
         )))
     }
 }
-fn bootout(env: &Env<'_>, required: bool) -> Result<(), Error> {
+pub(crate) fn bootout(env: &Env<'_>, required: bool) -> Result<(), Error> {
     let r = env.launchctl.run(&["bootout".into(), env.target()])?;
     if r.status == 0 || (!required && not_loaded(&r.stderr)) {
         Ok(())
@@ -195,14 +201,14 @@ fn bootout(env: &Env<'_>, required: bool) -> Result<(), Error> {
         )))
     }
 }
-fn stop_before_replace(env: &Env<'_>) -> Result<(), Error> {
+pub(crate) fn stop_before_replace(env: &Env<'_>) -> Result<(), Error> {
     match inspect(env)? {
         Inspection::Loaded => bootout(env, true),
         Inspection::NotLoaded => Ok(()),
         Inspection::Unavailable(_) => bootout(env, false),
     }
 }
-fn launch_ok(env: &Env<'_>, op: &str, args: Vec<String>) -> Result<(), Error> {
+pub(crate) fn launch_ok(env: &Env<'_>, op: &str, args: Vec<String>) -> Result<(), Error> {
     let r = env.launchctl.run(&args)?;
     if r.status == 0 {
         Ok(())
@@ -214,7 +220,7 @@ fn launch_ok(env: &Env<'_>, op: &str, args: Vec<String>) -> Result<(), Error> {
     }
 }
 
-fn choose(
+pub(crate) fn choose(
     conn: &mut rusqlite::Connection,
     scope: &str,
     explicit: Option<PathBuf>,
@@ -261,319 +267,6 @@ fn setup_with(
     choose(&mut db, scope, explicit, discovery)?;
     install_service(env)
 }
-fn install_service(env: &Env<'_>) -> Result<(), Error> {
-    let binary = stage_binary(env)?;
-    let plist_stage = stage(&env.paths.plist, plist(&env.paths)?.as_bytes(), false)?;
-    fs::create_dir_all(&env.paths.data)
-        .map_err(|e| Error::Io(format!("cannot create app data: {e}")))?;
-    fs::create_dir_all(env.paths.stdout.parent().unwrap())
-        .map_err(|e| Error::Io(format!("cannot create log directory: {e}")))?;
-    stop_before_replace(env)?;
-    replace(binary, &env.paths.binary)?;
-    replace(plist_stage, &env.paths.plist)?;
-    launch_ok(
-        env,
-        "bootstrap",
-        vec![
-            "bootstrap".into(),
-            env.domain(),
-            env.paths.plist.to_string_lossy().into_owned(),
-        ],
-    )?;
-    launch_ok(env, "kickstart", vec!["kickstart".into(), env.target()])?;
-    Ok(())
-}
-fn setup_auto_with(
-    env: &Env<'_>,
-    scope: Option<&str>,
-    explicit: Option<PathBuf>,
-    discovery: impl FnOnce() -> Result<Vec<crate::ProfileCandidate>, Error>,
-) -> Result<(), Error> {
-    let mut db = open_database(&env.paths.database)?;
-    match scope {
-        Some(scope) => {
-            choose(&mut db, scope, explicit, discovery)?;
-        }
-        None => {
-            if explicit.is_some() {
-                return Err(Error::Input("--profile-root requires --profile".into()));
-            }
-            let scopes = configured_profile_scopes(&db)?;
-            if scopes.is_empty() {
-                choose(&mut db, "default", None, discovery)?;
-            } else {
-                let mut valid = 0;
-                for scope in scopes {
-                    match load_profile_location(&db, &scope) {
-                        Ok(_) => valid += 1,
-                        Err(error) => eprintln!("configured profile invalid: {scope}: {error}"),
-                    }
-                }
-                if valid == 0 {
-                    return Err(Error::Input("no valid configured profiles; repair configuration with setup --profile <scope> --profile-root <path>".into()));
-                }
-            }
-        }
-    }
-    install_service(env)
-}
-fn status_with(env: &Env<'_>) -> Result<String, Error> {
-    let mut out = format!(
-        "service: {}\ncollector_binary: {}\ndatabase: {}\n",
-        if env.paths.plist.exists() {
-            "installed"
-        } else {
-            "not installed"
-        },
-        if env.paths.binary.exists() {
-            env.paths.binary.display().to_string()
-        } else {
-            "missing".into()
-        },
-        env.paths.database.display()
-    );
-    match inspect(env)? {
-        Inspection::Loaded => {
-            out.push_str("launchd: loaded\n");
-            let r = env.launchctl.run(&["print".into(), env.target()])?;
-            out.push_str(if r.stdout.lines().any(|l| l.trim() == "state = running") {
-                "state: running\n"
-            } else {
-                "state: unavailable\n"
-            });
-        }
-        Inspection::NotLoaded => out.push_str("launchd: not loaded\n"),
-        Inspection::Unavailable(e) => out.push_str(&format!("launchd: unavailable ({e})\n")),
-    }
-    if !env.paths.database.exists() {
-        out.push_str("profiles: unavailable (database missing)\n");
-        return Ok(out);
-    }
-    let db = rusqlite::Connection::open_with_flags(
-        &env.paths.database,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| Error::Database(e.to_string()))?;
-    let scopes = configured_profile_scopes(&db)?;
-    out.push_str(&format!("profiles: {}\n", scopes.len()));
-    let roots = scopes
-        .iter()
-        .filter_map(|s| {
-            load_profile_location(&db, s)
-                .ok()
-                .map(|x| (s, x.profile_root))
-        })
-        .collect::<Vec<_>>();
-    for s in &scopes {
-        let valid = load_profile_location(&db, s).is_ok();
-        let shared = roots
-            .iter()
-            .find(|(x, _)| *x == s)
-            .is_some_and(|(_, r)| roots.iter().filter(|(_, q)| q == r).count() > 1);
-        out.push_str(&format!(
-            "{s}\tlocator {}{}\n",
-            if valid { "valid" } else { "invalid" },
-            if shared { " (shared)" } else { "" }
-        ));
-    }
-    Ok(out)
-}
-fn monitor_recent(paths: &Paths, lines: usize) -> Result<Vec<String>, Error> {
-    fn recent(path: &Path, label: &str, lines: usize) -> Result<Vec<String>, Error> {
-        if !path.exists() {
-            return Ok(vec![]);
-        }
-        let text = fs::read_to_string(path)
-            .map_err(|e| Error::Io(format!("cannot read collector log {}: {e}", path.display())))?;
-        Ok(text
-            .lines()
-            .rev()
-            .take(lines)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .map(|line| format!("[{label}] {line}"))
-            .collect())
-    }
-    let mut out = recent(&paths.stdout, "collector", lines)?;
-    out.extend(recent(&paths.stderr, "error", lines)?);
-    Ok(out)
-}
-fn monitor_read(path: &Path, label: &str, offset: &mut u64) -> Result<Vec<String>, Error> {
-    if !path.exists() {
-        *offset = 0;
-        return Ok(vec![]);
-    }
-    let len = fs::metadata(path)
-        .map_err(|e| {
-            Error::Io(format!(
-                "cannot inspect collector log {}: {e}",
-                path.display()
-            ))
-        })?
-        .len();
-    if len < *offset {
-        *offset = 0
-    }
-    let mut file = fs::File::open(path)
-        .map_err(|e| Error::Io(format!("cannot open collector log {}: {e}", path.display())))?;
-    use std::io::Seek;
-    file.seek(std::io::SeekFrom::Start(*offset))
-        .map_err(|e| Error::Io(format!("cannot seek collector log: {e}")))?;
-    let mut text = String::new();
-    file.read_to_string(&mut text)
-        .map_err(|e| Error::Io(format!("cannot read collector log: {e}")))?;
-    *offset = len;
-    Ok(text
-        .lines()
-        .map(|line| format!("[{label}] {line}"))
-        .collect())
-}
-fn monitor_new_lines(
-    paths: &Paths,
-    stdout: &mut u64,
-    stderr: &mut u64,
-) -> Result<Vec<String>, Error> {
-    let mut lines = monitor_read(&paths.stdout, "collector", stdout)?;
-    lines.extend(monitor_read(&paths.stderr, "error", stderr)?);
-    Ok(lines)
-}
-fn monitor_with(paths: &Paths, lines: usize) -> Result<(), Error> {
-    if !paths.stdout.exists() && !paths.stderr.exists() && !paths.plist.exists() {
-        return Err(Error::Input(
-            "collector logs are absent and no managed service is installed".into(),
-        ));
-    }
-    println!("monitoring collector logs; Ctrl+C to stop");
-    for line in monitor_recent(paths, lines)? {
-        println!("{line}")
-    }
-    let mut out_offset = fs::metadata(&paths.stdout).map(|m| m.len()).unwrap_or(0);
-    let mut err_offset = fs::metadata(&paths.stderr).map(|m| m.len()).unwrap_or(0);
-    let dir = paths
-        .stdout
-        .parent()
-        .ok_or_else(|| Error::Input("collector log path has no parent".into()))?;
-    fs::create_dir_all(dir)
-        .map_err(|e| Error::Io(format!("cannot inspect collector log directory: {e}")))?;
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let mut watcher = notify::recommended_watcher(move |event| {
-        let _ = sender.send(event);
-    })
-    .map_err(|e| Error::Io(format!("monitor watcher initialization failed: {e}")))?;
-    use notify::Watcher;
-    watcher
-        .watch(dir, notify::RecursiveMode::NonRecursive)
-        .map_err(|e| Error::Io(format!("monitor watcher initialization failed: {e}")))?;
-    loop {
-        match receiver.recv_timeout(std::time::Duration::from_millis(300)) {
-            Ok(Ok(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Ok(Err(error)) => {
-                return Err(Error::Io(format!("monitor watcher event failed: {error}")));
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                return Err(Error::Io("monitor watcher channel failed".into()));
-            }
-        }
-        for line in monitor_new_lines(paths, &mut out_offset, &mut err_offset)? {
-            println!("{line}")
-        }
-    }
-}
-fn uninstall_with(env: &Env<'_>) -> Result<(), Error> {
-    match inspect(env)? {
-        Inspection::Loaded => bootout(env, true)?,
-        Inspection::Unavailable(_) => bootout(env, false)?,
-        Inspection::NotLoaded => {}
-    }
-    for p in [&env.paths.plist, &env.paths.binary] {
-        if p.exists() {
-            fs::remove_file(p)
-                .map_err(|e| Error::Io(format!("cannot remove {}: {e}", p.display())))?;
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn unsupported() -> Error {
-    Error::Input("macOS background-service lifecycle is unsupported on this platform".into())
-}
-pub fn setup(scope: Option<&str>, root: Option<PathBuf>) -> Result<(), Error> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (scope, root);
-        return Err(unsupported());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let real = RealLaunchctl;
-        let env = Env {
-            paths: production_paths()?,
-            source: std::env::current_exe()
-                .map_err(|e| Error::Io(format!("cannot resolve current executable: {e}")))?,
-            uid: real_uid(),
-            launchctl: &real,
-        };
-        setup_auto_with(&env, scope, root, discover_default)?;
-        println!("setup complete: collector monitors all configured profiles");
-        Ok(())
-    }
-}
-pub fn collect() -> Result<(), Error> {
-    let mut db = open_database(&default_database_path()?)?;
-    crate::collect(&mut db)
-}
-pub fn status() -> Result<(), Error> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        return Err(unsupported());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let real = RealLaunchctl;
-        let env = Env {
-            paths: production_paths()?,
-            source: PathBuf::new(),
-            uid: real_uid(),
-            launchctl: &real,
-        };
-        print!("{}", status_with(&env)?);
-        Ok(())
-    }
-}
-pub fn uninstall() -> Result<(), Error> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        return Err(unsupported());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let real = RealLaunchctl;
-        let env = Env {
-            paths: production_paths()?,
-            source: PathBuf::new(),
-            uid: real_uid(),
-            launchctl: &real,
-        };
-        uninstall_with(&env)?;
-        println!("service artifacts removed; database and history preserved");
-        Ok(())
-    }
-}
-pub fn monitor(lines: usize) -> Result<(), Error> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = lines;
-        return Err(unsupported());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let paths = production_paths()?;
-        monitor_with(&paths, lines)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -647,7 +340,7 @@ mod tests {
         p
     }
     fn fixture() -> String {
-        include_str!("../reference/fixtures/hired_drivers_minimal.sii").into()
+        include_str!("../../reference/fixtures/hired_drivers_minimal.sii").into()
     }
     #[test]
     fn plist_complete_and_escaped() {
