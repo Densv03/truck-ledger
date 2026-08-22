@@ -12,6 +12,8 @@ directories = "6.0.0"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 sha2 = "0.10.9"
 sii-decode-rs = { git = "https://github.com/fangyi-zhou/sii-decode-rs", rev = "f65cc2f68401e74cfb7c1aae497d196c79d051a7" }
+notify = "8.2.0"
+walkdir = "2.5.0"
+tempfile = "3.23.0"
 
 [dev-dependencies]
-tempfile = "3.23.0"

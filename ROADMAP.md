@@ -61,7 +61,6 @@ original saves; fixture behavior passes production tests; SQLite deduplicates
 within profile; repeated import is idempotent.
 
 **Status:** Phase 1 implementation and local regression coverage present.
-Phase 2 discovery and collection work remains incomplete.
 
 Profile scope is separate from content fingerprinting. Drivers are unique by
 profile plus raw ETS2 driver ID. Trip uniqueness is
@@ -90,6 +89,20 @@ unbounded polling/retries, HTTP, UI, rollback timeline management.
 selected as documented, multiples require selection; invalid configured profile
 reports clearly; transient failures recover or terminate clearly without
 blocking later saves; originals are never written.
+
+**Status:** implemented for macOS automatic discovery plus explicit bounded
+custom roots. `discover` is read-only. `watch` persists an explicitly selected
+profile location, catches up all real `game.sii` files beneath `save/`, then
+uses native notifications with 300 ms debounce and bounded fresh-snapshot
+retries. Windows/Linux default discovery, service installation, HTTP, and UI
+remain outside this phase. Collection is append-only: loading older ETS2 saves
+does not delete history or create rollback branches.
+
+Manual macOS Steam Cloud verification confirmed real ETS2 save writes flow
+through native notifications, debounce, bounded rescan, fresh snapshot decode,
+deduplication, and SQLite insertion. The ignored synthetic native-watcher test
+remains supplementary because restricted local FSEvents environments may time
+out.
 
 Persistent data uses a platform-standard per-user application-data directory
 with testable path resolution and explicit override. Tests use temporary paths.

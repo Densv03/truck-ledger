@@ -5,17 +5,67 @@ Simulator 2 (ETS2). ETS2 retains only a short rolling window of hired-driver
 profit history in save files; TruckLedger is intended to collect that history
 locally before it disappears.
 
-TruckLedger is pre-v0.1 and under development. Phase 1 imports one explicitly
-supplied ETS2 `ScsC` save or decoded `SiiNunit` file into local SQLite:
+TruckLedger is pre-v0.1 and under development. Phase 2 imports explicit saves
+and can collect a selected ETS2 profile in foreground:
 
 ```sh
 truck-ledger ingest --profile fixture-profile --input game.sii
 truck-ledger ingest --profile fixture-profile --input decoded.sii --database /tmp/ledger.sqlite3
 ```
 
-Profiles and input paths are explicit. Automatic ETS2/Steam discovery and
-watchers are Phase 2. Default data is stored in platform local application
-data under `truck-ledger/truck-ledger.sqlite3`.
+Default data is stored in platform local application data under
+`truck-ledger/truck-ledger.sqlite3`.
+
+## Discovery and collection
+
+Automatic default discovery currently supports macOS only. It probes only:
+
+- `~/Library/Application Support/Euro Truck Simulator 2/profiles/*/save`
+- `~/Library/Application Support/Steam/userdata/<account>/227300/remote/profiles/*/save`
+
+Use `discover` to list candidates. It never writes the database or selects a
+profile:
+
+```sh
+truck-ledger discover
+truck-ledger discover --root /explicit/ets2-or-steam-root
+```
+
+Custom roots work on supported Rust platforms, but are structurally bounded:
+the supplied directory itself may be a profile; otherwise only `profiles/*` and
+`userdata/<numeric-account>/227300/remote/profiles/*` are inspected. TruckLedger
+does not recursively scan a home directory, disk, or unrelated parent path.
+Windows and Linux automatic default discovery are not implemented; use
+`discover --root` there.
+
+Start foreground collection by explicitly selecting a profile root:
+
+```sh
+truck-ledger watch --profile my-history --profile-root /path/to/profile
+truck-ledger watch --profile my-history
+```
+
+`--profile-root` must be a real directory with a real `save/` directory. Its
+absolute UTF-8 lexical path is stored as locator metadata for that TruckLedger
+profile scope; changing it updates metadata without changing stored trip or
+driver identity. The second command uses that persisted locator. Missing or
+invalid locators fail clearly; TruckLedger never silently chooses another
+candidate. Non-UTF-8 selected paths cannot currently be persisted.
+
+On startup, `watch` catches up every real regular `game.sii` found recursively
+under selected `save/`; slot names are not hard-coded. It then uses native
+filesystem notifications, not permanent polling. Relevant event bursts use a
+300 ms quiet debounce then bounded tree rescan. Each source attempt copies the
+live save to a fresh system temporary snapshot before decoding. Source/decode/
+parse failures retry at most four times with 100/200/400 ms backoff; failures
+for one save are reported and do not stop later events. Live saves are never
+opened writable. Collection is append-only: loading an older ETS2 save does not
+remove historical TruckLedger trips or infer timeline branches.
+
+The macOS Steam Cloud collector has been manually verified against real ETS2
+save writes: native events triggered debounced rescans, unchanged save content
+deduplicated to zero inserts, and later hired-driver history changes inserted
+new trips.
 
 Money and `timestamp_day` are raw ETS2 integers. Net is derived as `revenue -
 wage - maintenance - fuel`; no currency or wall-clock semantics are assumed.
@@ -37,8 +87,7 @@ storage, discover profiles and changed saves, and serve a browser dashboard on
 loopback only. Everything stays local: no cloud backend, accounts, remote sync,
 or telemetry.
 
-macOS is first tested platform. Code should avoid unnecessary platform
-coupling so Windows and Linux support can follow.
+macOS is first tested platform. Phase 3 HTTP/UI remains unimplemented.
 
 See [ROADMAP.md](ROADMAP.md) for phased scope and acceptance criteria.
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for decoder attribution.
