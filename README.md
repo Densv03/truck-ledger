@@ -71,6 +71,8 @@ Use `truck-ledger <command> --help` for flags.
 and lifetime statistics for every driver. Select driver to drill into that driver's archived trips.
 
 <img width="1728" height="994" alt="image" src="https://github.com/user-attachments/assets/c1af5356-ed67-42b0-baa8-29587c61f875" />
+<img width="1728" height="988" alt="image" src="https://github.com/user-attachments/assets/de77cd26-7b4a-4138-93d6-2330d655da19" />
+
 
 
 Dashboard is read-only. Server binds IPv4 loopback only (`127.0.0.1`), so it
