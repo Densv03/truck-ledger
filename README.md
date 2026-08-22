@@ -70,6 +70,9 @@ Use `truck-ledger <command> --help` for flags.
 `truck-ledger serve` starts driver-first local dashboard. Select profile, then view profile summary, top drivers by cumulative lifetime net, losing drivers,
 and lifetime statistics for every driver. Select driver to drill into that driver's archived trips.
 
+<img width="1728" height="994" alt="image" src="https://github.com/user-attachments/assets/c1af5356-ed67-42b0-baa8-29587c61f875" />
+
+
 Dashboard is read-only. Server binds IPv4 loopback only (`127.0.0.1`), so it
 is not exposed to LAN or internet.
 
