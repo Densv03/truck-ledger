@@ -47,14 +47,10 @@ for one supported slice. It packages only `/usr/local/bin/truck-ledger` with
 identifier `com.truckledger.cli`; validator expands without installing and
 checks metadata, payload, permissions, binary version, architecture, and BOM.
 
-Production tags must equal `v${Cargo package version}`. Release workflow builds
-unsigned native arm64 and x86_64 installers with
-`MACOSX_DEPLOYMENT_TARGET=13.0`, validates package contents, then hashes final
-package bytes before publishing both architectures together. It requires no
-Apple Developer credentials. Current releases are unsigned and non-notarized;
-README documents checksum verification and macOS per-installer Open Anyway
-approval. Developer ID signing/notarization may be added later if project
-funding/resources make it appropriate.
+See [RELEASING.md](RELEASING.md) for normal release flow. Cargo package version
+declares release intent; successful CI on `main` creates tag and publishes both
+unsigned native macOS packages automatically. Do not normally create a
+release-preparation branch or manually create/push release tags.
 
 ## Reference fixture verification
 
