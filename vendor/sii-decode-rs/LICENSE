@@ -1,11 +1,3 @@
-# Third-party notices
-
-TruckLedger vendors a minimal fork of
-[sii-decode-rs](https://github.com/fangyi-zhou/sii-decode-rs), sourced from
-commit `f65cc2f68401e74cfb7c1aae497d196c79d051a7`, under MIT license. Fork
-provenance and TruckLedger delta are recorded in
-`vendor/sii-decode-rs/VENDORED_FROM.md`.
-
 MIT License
 
 Copyright (c) 2025 Fangyi Zhou

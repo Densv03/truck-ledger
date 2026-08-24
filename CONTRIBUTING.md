@@ -28,6 +28,10 @@ git diff -- reference
 `Cargo.lock` is committed because TruckLedger is an application. Update it
 only through intentional dependency changes.
 
+`vendor/sii-decode-rs` is MIT-licensed source from upstream commit
+`f65cc2f68401e74cfb7c1aae497d196c79d051a7`. Its provenance file records
+TruckLedger-only delta; preserve both when updating dependency source.
+
 ## macOS package and release validation
 
 Build unsigned local developer package without Apple credentials:
