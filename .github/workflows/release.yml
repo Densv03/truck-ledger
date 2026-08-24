@@ -1,18 +1,112 @@
 name: Release macOS packages
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-macos
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    name: Resolve release state
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.resolve.outputs.should_release }}
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      release_sha: ${{ steps.resolve.outputs.release_sha }}
+    steps:
+      - name: Reject non-main manual dispatches
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "error: manual release recovery must be dispatched from main" >&2; exit 1; }
+      - name: Checkout CI-approved or dispatch commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - name: Resolve immutable release ref
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version() {
+            awk '
+              /^\[package\][[:space:]]*$/ { in_package = 1; next }
+              /^\[/ { in_package = 0 }
+              in_package && /^[[:space:]]*version[[:space:]]*=/ {
+                value = $0
+                sub(/^[^=]*=[[:space:]]*"/, "", value)
+                sub(/"[[:space:]]*(#.*)?$/, "", value)
+                print value
+                exit
+              }
+            '
+          }
+          api_status() {
+            local endpoint="$1" body status
+            body="$(mktemp)"
+            if ! status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'Accept: application/vnd.github+json' \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/${endpoint}")"; then
+              rm -f "$body"
+              echo "error: GitHub API lookup failed for ${endpoint}" >&2
+              exit 1
+            fi
+            rm -f "$body"
+            case "$status" in
+              200|404) printf '%s\n' "$status" ;;
+              *) echo "error: GitHub API lookup for ${endpoint} returned HTTP ${status}" >&2; exit 1 ;;
+            esac
+          }
+          version="$(package_version < Cargo.toml)"
+          [[ -n "$version" ]] || { echo "error: root Cargo.toml package version missing" >&2; exit 1; }
+          tag="v${version}"
+          release_status="$(api_status "releases/tags/${tag}")"
+          if [[ "$release_status" == 200 ]]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag_status="$(api_status "git/ref/tags/${tag}")"
+          release_sha="$INPUT_SHA"
+          if [[ "$tag_status" == 200 ]]; then
+            git fetch --no-tags origin "refs/tags/${tag}:refs/tags/${tag}"
+            release_sha="$(git rev-parse "${tag}^{}")"
+            tagged_version="$(git show "${release_sha}:Cargo.toml" | package_version)"
+            [[ "$tagged_version" == "$version" ]] || { echo "error: ${tag} points to Cargo version ${tagged_version:-missing}, not ${version}" >&2; exit 1; }
+            git fetch origin main
+            git merge-base --is-ancestor "$release_sha" origin/main || { echo "error: ${tag} commit is not reachable from origin/main" >&2; exit 1; }
+          fi
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
+
   package:
     name: ${{ matrix.artifact_arch }} package
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ${{ matrix.runner }}
-
     strategy:
       fail-fast: false
       matrix:
@@ -21,88 +115,54 @@ jobs:
             artifact_arch: arm64
           - runner: macos-15-intel
             artifact_arch: x86_64
-
     steps:
-      - name: Checkout
+      - name: Checkout immutable release commit
         uses: actions/checkout@v4
-
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
+          fetch-depth: 1
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.85
         with:
           components: rustfmt, clippy
-
       - name: Validate release contract
         shell: bash
         run: |
           set -euo pipefail
-
           version="$(cargo pkgid --manifest-path Cargo.toml | sed 's/.*[#@]//')"
-
-          if [[ "${GITHUB_REF_NAME}" != "v${version}" ]]; then
-            echo "error: tag ${GITHUB_REF_NAME} must equal v${version}" >&2
-            exit 1
-          fi
-
+          [[ "v${version}" == "${{ needs.prepare.outputs.tag }}" ]] || { echo "error: selected commit version must equal release tag" >&2; exit 1; }
       - name: Check formatting
         run: cargo fmt --check
-
       - name: Run Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
-
       - name: Run tests
         run: cargo test --locked
-
       - name: Build debug
         run: cargo build --locked
-
       - name: Build native release binary
         env:
           MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: cargo build --release --locked
-
       - name: Verify native binary architecture
         shell: bash
         run: |
           set -euo pipefail
-
           architectures="$(lipo -archs target/release/truck-ledger)"
-
-          if [[ "$architectures" != "${{ matrix.artifact_arch }}" ]]; then
-            echo "error: expected ${{ matrix.artifact_arch }}, found $architectures" >&2
-            exit 1
-          fi
-
+          [[ "$architectures" == "${{ matrix.artifact_arch }}" ]] || { echo "error: expected ${{ matrix.artifact_arch }}, found $architectures" >&2; exit 1; }
       - name: Build and validate unsigned package
         shell: bash
         run: |
           set -euo pipefail
-
           mkdir -p release-artifacts
-
-          ./packaging/macos/build-pkg.sh \
-            --output-dir release-artifacts
-
-          version="$(cargo pkgid --manifest-path Cargo.toml | sed 's/.*[#@]//')"
-
-          package="release-artifacts/truck-ledger-${version}-macos-${{ matrix.artifact_arch }}.pkg"
-
-          ./packaging/macos/validate-pkg.sh \
-            --pkg "$package" \
-            --min-macos 13.0
-
+          ./packaging/macos/build-pkg.sh --output-dir release-artifacts
+          package="release-artifacts/truck-ledger-${{ needs.prepare.outputs.version }}-macos-${{ matrix.artifact_arch }}.pkg"
+          ./packaging/macos/validate-pkg.sh --pkg "$package" --min-macos 13.0
       - name: Create final checksum
         shell: bash
         run: |
           set -euo pipefail
-
-          version="$(cargo pkgid --manifest-path Cargo.toml | sed 's/.*[#@]//')"
-          package="release-artifacts/truck-ledger-${version}-macos-${{ matrix.artifact_arch }}.pkg"
-
-          (
-            cd release-artifacts
-            shasum -a 256 "$(basename "$package")" > "$(basename "$package").sha256"
-          )
-
+          package="release-artifacts/truck-ledger-${{ needs.prepare.outputs.version }}-macos-${{ matrix.artifact_arch }}.pkg"
+          (cd release-artifacts && shasum -a 256 "$(basename "$package")" > "$(basename "$package").sha256")
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -112,62 +172,79 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: package
+    needs: [prepare, package]
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
-
     steps:
-      - name: Checkout
+      - name: Checkout immutable release commit
         uses: actions/checkout@v4
-
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
+          fetch-depth: 0
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
           merge-multiple: true
-
       - name: Validate release files
         shell: bash
         run: |
           set -euo pipefail
-
-          version="${GITHUB_REF_NAME#v}"
-
           for architecture in arm64 x86_64; do
-            package="release-artifacts/truck-ledger-${version}-macos-${architecture}.pkg"
+            package="release-artifacts/truck-ledger-${{ needs.prepare.outputs.version }}-macos-${architecture}.pkg"
             checksum="${package}.sha256"
-
-            if [[ ! -f "$package" ]]; then
-              echo "error: missing release package for $architecture: $package" >&2
-              exit 1
-            fi
-
-            if [[ ! -f "$checksum" ]]; then
-              echo "error: missing checksum for $architecture: $checksum" >&2
-              exit 1
-            fi
-
-            (
-              cd release-artifacts
-              sha256sum -c "truck-ledger-${version}-macos-${architecture}.pkg.sha256"
-            )
+            [[ -f "$package" ]] || { echo "error: missing $package" >&2; exit 1; }
+            [[ -f "$checksum" ]] || { echo "error: missing $checksum" >&2; exit 1; }
+            (cd release-artifacts && sha256sum -c "$(basename "$checksum")")
           done
-
-      - name: Publish GitHub Release
+      - name: Create immutable tag and publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-
-          version="${GITHUB_REF_NAME#v}"
-
-          gh release create "v${version}" \
-            release-artifacts/truck-ledger-${version}-macos-arm64.pkg \
-            release-artifacts/truck-ledger-${version}-macos-arm64.pkg.sha256 \
-            release-artifacts/truck-ledger-${version}-macos-x86_64.pkg \
-            release-artifacts/truck-ledger-${version}-macos-x86_64.pkg.sha256 \
-            --title "v${version}" \
+          api_status() {
+            local endpoint="$1" body status
+            body="$(mktemp)"
+            if ! status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'Accept: application/vnd.github+json' \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/${endpoint}")"; then
+              rm -f "$body"
+              echo "error: GitHub API lookup failed for ${endpoint}" >&2
+              exit 1
+            fi
+            rm -f "$body"
+            case "$status" in
+              200|404) printf '%s\n' "$status" ;;
+              *) echo "error: GitHub API lookup for ${endpoint} returned HTTP ${status}" >&2; exit 1 ;;
+            esac
+          }
+          release_status="$(api_status "releases/tags/${TAG}")"
+          if [[ "$release_status" == 200 ]]; then
+            echo "release ${TAG} already exists; no-op"
+            exit 0
+          fi
+          tag_status="$(api_status "git/ref/tags/${TAG}")"
+          if [[ "$tag_status" == 404 ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" "$RELEASE_SHA" -m "Release ${TAG}"
+            git push origin "refs/tags/${TAG}"
+          else
+            git fetch --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"
+            existing_sha="$(git rev-parse "${TAG}^{}")"
+            [[ "$existing_sha" == "$RELEASE_SHA" ]] || { echo "error: existing ${TAG} points to ${existing_sha}, not selected ${RELEASE_SHA}" >&2; exit 1; }
+          fi
+          gh release create "$TAG" \
+            "release-artifacts/truck-ledger-${VERSION}-macos-arm64.pkg" \
+            "release-artifacts/truck-ledger-${VERSION}-macos-arm64.pkg.sha256" \
+            "release-artifacts/truck-ledger-${VERSION}-macos-x86_64.pkg" \
+            "release-artifacts/truck-ledger-${VERSION}-macos-x86_64.pkg.sha256" \
+            --title "$TAG" \
             --generate-notes
