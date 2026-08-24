@@ -1,5 +1,34 @@
 use crate::domain::{Driver, Error, Trip};
-use std::collections::BTreeMap;
+use std::{
+    any::Any,
+    collections::BTreeMap,
+    panic::{self, AssertUnwindSafe},
+};
+
+fn panic_message(payload: Box<dyn Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_owned()
+    }
+}
+
+fn decode_with<F>(decode: F) -> Result<Vec<u8>, Error>
+where
+    F: FnOnce() -> Result<Vec<u8>, sii_decode::file_type::DecodeError>,
+{
+    let result = panic::catch_unwind(AssertUnwindSafe(decode));
+
+    match result {
+        Ok(decoded) => decoded.map_err(|e| Error::Decode(format!("ScsC decode failed: {e}"))),
+        Err(payload) => Err(Error::Decode(format!(
+            "decoder panicked: {}",
+            panic_message(payload)
+        ))),
+    }
+}
 
 pub(crate) fn decode_input(bytes: &[u8]) -> Result<String, Error> {
     if bytes.starts_with(b"BSII") {
@@ -8,8 +37,7 @@ pub(crate) fn decode_input(bytes: &[u8]) -> Result<String, Error> {
         ));
     }
     let output = if bytes.starts_with(b"ScsC") {
-        sii_decode::file_type::decode_until_siin(bytes)
-            .map_err(|e| Error::Decode(format!("ScsC decode failed: {e}")))?
+        decode_with(|| sii_decode::file_type::decode_until_siin(bytes))?
     } else if bytes.starts_with(b"SiiNunit") {
         bytes.to_vec()
     } else {
@@ -18,6 +46,67 @@ pub(crate) fn decode_input(bytes: &[u8]) -> Result<String, Error> {
         ));
     };
     String::from_utf8(output).map_err(|e| Error::Parse(format!("decoded SII is not UTF-8: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::Error;
+
+    #[test]
+    fn vendored_decoder_serializes_type_17_vec4s() {
+        let bytes = [
+            b'B', b'S', b'I', b'I', 2, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 4, 0, 0, 0, b't', b'e',
+            b's', b't', 0x17, 0, 0, 0, 5, 0, 0, 0, b'v', b'e', b'c', b'4', b's', 0, 0, 0, 0, 1, 0,
+            0, 0, 0xff, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x80, 0x3f, 0, 0, 0x20, 0xc0, 0, 0, 0, 0, 0,
+            0, 0x40, 0x40, 0, 0, 0, 0, 0,
+        ];
+
+        assert_eq!(
+            String::from_utf8(sii_decode::file_type::decode_until_siin(&bytes).unwrap()).unwrap(),
+            "SiiNunit\n{\ntest : _nameless.1 {\n  vec4s: (1; &c0200000, 0, 3)\n}\n}\n"
+        );
+    }
+
+    #[test]
+    fn vendored_decoder_rejects_truncated_type_17_vec4s() {
+        let bytes = [
+            b'B', b'S', b'I', b'I', 2, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 4, 0, 0, 0, b't', b'e',
+            b's', b't', 0x17, 0, 0, 0, 5, 0, 0, 0, b'v', b'e', b'c', b'4', b's', 0, 0, 0, 0, 1, 0,
+            0, 0, 0xff, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x80, 0x3f,
+        ];
+
+        assert!(sii_decode::file_type::decode_until_siin(&bytes).is_err());
+    }
+
+    #[test]
+    fn decoder_panic_becomes_controlled_decode_error() {
+        let error =
+            super::decode_with(|| -> Result<Vec<u8>, sii_decode::file_type::DecodeError> {
+                panic!("injected decoder panic")
+            })
+            .unwrap_err();
+
+        assert!(
+            matches!(error, Error::Decode(message) if message == "decoder panicked: injected decoder panic")
+        );
+    }
+
+    #[test]
+    fn concurrent_decoder_panics_are_contained_independently() {
+        let workers = (0..2)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    super::decode_with(|| -> Result<Vec<u8>, sii_decode::file_type::DecodeError> {
+                        panic!("injected concurrent decoder panic")
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for worker in workers {
+            assert!(matches!(worker.join().unwrap(), Err(Error::Decode(_))));
+        }
+    }
 }
 
 #[derive(Default)]

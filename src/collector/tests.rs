@@ -324,6 +324,31 @@ fn retry_can_succeed_after_transient_failure() {
 }
 
 #[test]
+fn exhausted_decoder_failures_do_not_mutate_db_and_later_save_ingests() {
+    let td = tempfile::tempdir().unwrap();
+    let mut conn = open_database(&td.path().join("ledger.db")).unwrap();
+    let mut attempts = 0;
+    let mut waits = Vec::new();
+
+    let result: Result<Result<(), Error>, Error> = retry_source(
+        || {
+            attempts += 1;
+            Err(Error::Decode("decoder panicked: injected".into()))
+        },
+        |duration| waits.push(duration),
+    );
+
+    assert!(matches!(result, Ok(Err(Error::Decode(_)))));
+    assert_eq!(attempts, 4);
+    assert_eq!(waits, RETRY_BACKOFFS);
+    assert!(read_trips(&conn, "scope").unwrap().is_empty());
+
+    let result = ingest(&mut conn, "scope", &extract(&fixture()).unwrap()).unwrap();
+    assert_eq!(result.newly_inserted_trips, 2);
+    assert_eq!(read_trips(&conn, "scope").unwrap().len(), 2);
+}
+
+#[test]
 fn event_relevance_is_contained_and_pathless_is_conservative() {
     let td = tempfile::tempdir().unwrap();
     let save = absolute_lexical(&td.path().join("save")).unwrap();
